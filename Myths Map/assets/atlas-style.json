@@ -1,0 +1,405 @@
+{
+  "version": 8,
+  "name": "Myths Map \u00b7 Philippine Isles",
+  "projection": {
+    "name": "mercator"
+  },
+  "glyphs": "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
+  "sources": {
+    "countries": {
+      "type": "vector",
+      "url": "mapbox://mapbox.country-boundaries-v1"
+    },
+    "streets": {
+      "type": "vector",
+      "url": "mapbox://mapbox.mapbox-streets-v8"
+    },
+    "relief": {
+      "type": "raster-dem",
+      "url": "mapbox://mapbox.mapbox-terrain-dem-v1",
+      "tileSize": 512,
+      "maxzoom": 14
+    }
+  },
+  "layers": [
+    {
+      "id": "ocean-paper",
+      "type": "background",
+      "paint": {
+        "background-color": "#112b39"
+      }
+    },
+    {
+      "id": "ph-land",
+      "type": "fill",
+      "source": "countries",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "disputed"
+          ],
+          "false"
+        ],
+        [
+          "any",
+          [
+            "==",
+            [
+              "get",
+              "worldview"
+            ],
+            "all"
+          ],
+          [
+            "in",
+            "US",
+            [
+              "get",
+              "worldview"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "iso_3166_1"
+          ],
+          "PH"
+        ]
+      ],
+      "paint": {
+        "fill-color": "#e9d9b6"
+      },
+      "source-layer": "country_boundaries"
+    },
+    {
+      "id": "neighbor-land",
+      "type": "fill",
+      "source": "countries",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "disputed"
+          ],
+          "false"
+        ],
+        [
+          "any",
+          [
+            "==",
+            [
+              "get",
+              "worldview"
+            ],
+            "all"
+          ],
+          [
+            "in",
+            "US",
+            [
+              "get",
+              "worldview"
+            ]
+          ]
+        ],
+        [
+          "!=",
+          [
+            "get",
+            "iso_3166_1"
+          ],
+          "PH"
+        ]
+      ],
+      "paint": {
+        "fill-color": "#9caa9e"
+      },
+      "source-layer": "country_boundaries"
+    },
+    {
+      "id": "ph-parchment",
+      "type": "fill",
+      "source": "countries",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "disputed"
+          ],
+          "false"
+        ],
+        [
+          "any",
+          [
+            "==",
+            [
+              "get",
+              "worldview"
+            ],
+            "all"
+          ],
+          [
+            "in",
+            "US",
+            [
+              "get",
+              "worldview"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "iso_3166_1"
+          ],
+          "PH"
+        ]
+      ],
+      "paint": {
+        "fill-pattern": "parchment-grain",
+        "fill-opacity": 0.36
+      },
+      "source-layer": "country_boundaries"
+    },
+    {
+      "id": "engraved-relief",
+      "type": "hillshade",
+      "source": "relief",
+      "paint": {
+        "hillshade-shadow-color": "#c9ae82",
+        "hillshade-highlight-color": "#f7f3e9",
+        "hillshade-accent-color": "#c9ae82",
+        "hillshade-exaggeration": 0.3,
+        "hillshade-illumination-direction": 315,
+        "hillshade-illumination-anchor": "map"
+      }
+    },
+    {
+      "id": "ph-shore",
+      "type": "line",
+      "source": "countries",
+      "source-layer": "country_boundaries",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "disputed"
+          ],
+          "false"
+        ],
+        [
+          "any",
+          [
+            "==",
+            [
+              "get",
+              "worldview"
+            ],
+            "all"
+          ],
+          [
+            "in",
+            "US",
+            [
+              "get",
+              "worldview"
+            ]
+          ]
+        ],
+        [
+          "==",
+          [
+            "get",
+            "iso_3166_1"
+          ],
+          "PH"
+        ]
+      ],
+      "paint": {
+        "line-color": "#c9ae82",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          4.5,
+          0.5,
+          12,
+          1.1
+        ]
+      }
+    },
+    {
+      "id": "province-label",
+      "type": "symbol",
+      "source": "streets",
+      "source-layer": "place_label",
+      "minzoom": 7,
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "state"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "iso_3166_1"
+          ],
+          "PH"
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "DIN Offc Pro Italic",
+          "Arial Unicode MS Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          11,
+          12,
+          15
+        ],
+        "text-letter-spacing": 0.08,
+        "text-padding": 5
+      },
+      "paint": {
+        "text-color": "#243b3e",
+        "text-halo-color": "#f7f3e9",
+        "text-halo-width": 1
+      }
+    },
+    {
+      "id": "island-label",
+      "type": "symbol",
+      "source": "streets",
+      "source-layer": "natural_label",
+      "minzoom": 7,
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "landform"
+        ],
+        [
+          "match",
+          [
+            "downcase",
+            [
+              "to-string",
+              [
+                "get",
+                "type"
+              ]
+            ]
+          ],
+          [
+            "island",
+            "islands",
+            "islet",
+            "archipelago"
+          ],
+          true,
+          false
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "DIN Offc Pro Italic",
+          "Arial Unicode MS Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          11,
+          12,
+          15
+        ],
+        "text-letter-spacing": 0.08,
+        "text-padding": 5
+      },
+      "paint": {
+        "text-color": "#243b3e",
+        "text-halo-color": "#f7f3e9",
+        "text-halo-width": 1
+      }
+    }
+  ],
+  "terrain": {
+    "source": "relief",
+    "exaggeration": [
+      "interpolate",
+      [
+        "linear"
+      ],
+      [
+        "zoom"
+      ],
+      6,
+      0,
+      9,
+      1.25,
+      12,
+      1.6
+    ]
+  }
+}

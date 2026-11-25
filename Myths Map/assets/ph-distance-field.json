@@ -1,0 +1,23 @@
+{
+  "width": 1024,
+  "height": 1024,
+  "bounds": {
+    "minX": 0.8055555555555556,
+    "minY": 0.4251633263935758,
+    "maxX": 0.8694444444444445,
+    "maxY": 0.5
+  },
+  "geographicBounds": [
+    [
+      110,
+      0
+    ],
+    [
+      133,
+      26
+    ]
+  ],
+  "rowZero": "north",
+  "flipY": false,
+  "distanceAtWhite": 0.012749534908268604
+}
