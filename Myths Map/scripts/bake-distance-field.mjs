@@ -3,11 +3,11 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MAX_BOUNDS, mercatorBounds, mercX, mercY } from '../Script/config.js';
+import { MAX_BOUNDS, mercatorBounds, mercX, mercY } from '../src/engine/config.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const input = process.argv[2] || path.join(root, 'topojson/country/hires/country.topo.0.1.json');
-const output = process.argv[3] || path.join(root, 'assets');
+const output = process.argv[3] || path.join(root, 'public', 'assets');
 const topology = JSON.parse(await readFile(input, 'utf8'));
 const size = 1024;
 const bounds = mercatorBounds(MAX_BOUNDS);

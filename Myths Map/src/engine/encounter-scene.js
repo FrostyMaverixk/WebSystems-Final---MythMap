@@ -1,10 +1,14 @@
-import * as THREE from '../assets/three-0.160.0/three.module.min.js';
+import * as THREE from 'three';
 
 const ENCOUNTER_MODEL_IDS = Object.freeze([
   'amdag', 'amomongo', 'borak', 'buyagan', 'duwende', 'janggu', 'magindara',
   'manananggal', 'mangyan_nature_spirit', 'mumu', 'sarimanok', 'sigbin',
   'tambanokano', 'tarabusaw', 'tikbalang', 'tiyanak', 'white_deer'
 ]);
+
+export function hasEncounterModel(id) {
+  return typeof id === 'string' && ENCOUNTER_MODEL_IDS.includes(id);
+}
 
 const PALETTE = {
   parchment: 0xd9c6a1, pale: 0xeee0bd, charcoal: 0x30241f,
@@ -783,17 +787,43 @@ export function makeEnvironment() {
   contact.position.y = 0.012;
   contact.scale.set(1.5, 0.7, 1);
   scene.add(contact);
-  return { scene, camera, terrain, water, contact, trunk, canopy, rocks, grass, ridges, habitat: null };
+  return { scene, camera, hemisphere, sunlight, terrain, water, contact, trunk, canopy, rocks, grass, ridges, habitat: null, nightTint: false };
 }
 
-export function setHabitat(resources, habitat) {
-  if (resources.habitat === habitat) return;
+export function setAtmosphereTint(resources, { isDay = 1, effects = true } = {}) {
+  const night = Boolean(effects && isDay === 0);
+  resources.nightTint = night;
+  const palette = PALETTES[resources.habitat] || PALETTES.forest;
+  const sky = new THREE.Color(palette.sky);
+  if (night) {
+    // Subtle twilight/dusk tint synced with Open-Meteo is_day === 0
+    sky.lerp(new THREE.Color(0x1f3447), 0.52);
+    resources.hemisphere.color.setHex(0x8fa9c4);
+    resources.hemisphere.groundColor.setHex(0x283238);
+    resources.hemisphere.intensity = 1.65;
+    resources.sunlight.color.setHex(0xcfd8f0);
+    resources.sunlight.intensity = 1.75;
+  } else {
+    resources.hemisphere.color.setHex(0xe8eee0);
+    resources.hemisphere.groundColor.setHex(0x4a5140);
+    resources.hemisphere.intensity = 2.25;
+    resources.sunlight.color.setHex(0xffe3b7);
+    resources.sunlight.intensity = 2.6;
+  }
+  resources.scene.background = sky;
+  resources.scene.fog = new THREE.Fog(sky, 42, 135);
+}
+
+export function setHabitat(resources, habitat, atmosphere = {}) {
+  if (resources.habitat === habitat) {
+    setAtmosphereTint(resources, atmosphere);
+    return;
+  }
   resources.habitat = habitat;
   const palette = PALETTES[habitat];
   const random = randomFor(habitat);
   const dark = new THREE.Color(palette.ground), light = new THREE.Color(palette.light);
-  resources.scene.background = new THREE.Color(palette.sky);
-  resources.scene.fog = new THREE.Fog(palette.sky, 42, 135);
+  setAtmosphereTint(resources, atmosphere);
   resources.water.visible = habitat === 'coast';
   resources.canopy.material.color.set(palette.leaf);
   resources.grass.material.color.set(palette.light);

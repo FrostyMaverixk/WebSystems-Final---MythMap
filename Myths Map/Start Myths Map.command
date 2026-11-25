@@ -6,7 +6,7 @@ if ! command -v node >/dev/null 2>&1; then
   read -r answer
   exit 1
 fi
-printf '\nOpen http://127.0.0.1:3000 in your browser.\nKeep this window open while using Myths Map.\n\n'
-node server.mjs
+printf '\nOpen http://127.0.0.1:5173 in your browser.\nKeep this window open while using Myths Map.\n\n'
+npm run dev
 printf '\nPress Enter to close.'
 read -r answer

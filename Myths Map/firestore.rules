@@ -1,0 +1,217 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // Helper Functions
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAnonymous() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function isRegisteredUser() {
+      return isSignedIn() && !isAnonymous();
+    }
+
+    function isAdmin() {
+      return isRegisteredUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isValidImageUrl(url) {
+      return url == null
+        || url == ''
+        || (url is string && url.size() <= 500 && url.matches('^https://.*'));
+    }
+
+    function isValidPhBounds(data) {
+      return data.lat is number
+        && data.lng is number
+        && data.lat >= 4 && data.lat <= 22
+        && data.lng >= 116 && data.lng <= 127;
+    }
+
+    function isValidMythPayload(data) {
+      return data.title is string && data.title.size() >= 3 && data.title.size() <= 100
+        && data.author is string && data.author.size() >= 2 && data.author.size() <= 80
+        && data.story is string && data.story.size() >= 20 && data.story.size() <= 10000
+        && data.type in ['land', 'sea']
+        && data.get('region', '') is string && data.get('region', '').size() <= 80
+        && data.get('source', '') is string && data.get('source', '').size() <= 300
+        && isValidPhBounds(data)
+        && isValidImageUrl(data.get('imageUrl', ''));
+    }
+
+    function isValidReviewCategory(category) {
+      return category in [
+        'appreciation',
+        'regional_variant',
+        'historical_context',
+        'source_suggestion',
+        'correction'
+      ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Users Collection: users/{uid}
+    // -------------------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if (isSignedIn() && request.auth.uid == uid) || isAdmin();
+
+      allow create: if isRegisteredUser()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'bookmarks', 'createdAt', 'lastActiveAt'])
+        && request.resource.data.role == 'user'
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.get('email', '') is string
+        && request.resource.data.get('email', '').size() <= 254
+        && (!('bookmarks' in request.resource.data)
+            || (request.resource.data.bookmarks is list && request.resource.data.bookmarks.size() <= 1000));
+
+      allow update: if isRegisteredUser()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bookmarks', 'lastActiveAt'])
+        && request.resource.data.role == resource.data.role
+        && (!('name' in request.resource.data)
+            || (request.resource.data.name is string
+                && request.resource.data.name.size() >= 1
+                && request.resource.data.name.size() <= 80))
+        && (!('bookmarks' in request.resource.data)
+            || (request.resource.data.bookmarks is list && request.resource.data.bookmarks.size() <= 1000));
+
+      allow delete: if isAdmin() && request.auth.uid != uid;
+    }
+
+    // -------------------------------------------------------------------------
+    // Community Myths Collection: myths/{mythId}
+    // -------------------------------------------------------------------------
+    match /myths/{mythId} {
+      allow read: if resource.data.status == 'approved'
+        || (isSignedIn() && resource.data.ownerId == request.auth.uid)
+        || isAdmin();
+
+      allow create: if isRegisteredUser()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.get('reviewNote', '') == ''
+        && request.resource.data.get('feedbackHistory', []).size() == 0
+        && isValidMythPayload(request.resource.data);
+
+      allow update: if (
+        isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'reviewNote', 'feedbackHistory', 'reviewedBy', 'reviewedAt', 'updatedAt'])
+        && request.resource.data.status in ['pending', 'approved', 'needs_revision', 'rejected']
+        && request.resource.data.get('reviewNote', '') is string
+        && request.resource.data.get('reviewNote', '').size() <= 500
+        && request.resource.data.get('feedbackHistory', []) is list
+      ) || (
+        isRegisteredUser()
+        && resource.data.ownerId == request.auth.uid
+        && resource.data.status in ['needs_revision', 'rejected']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.get('feedbackHistory', []) == resource.data.get('feedbackHistory', [])
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['title', 'author', 'story', 'lat', 'lng', 'type', 'region', 'source', 'imageUrl', 'status', 'updatedAt'])
+        && isValidMythPayload(request.resource.data)
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-Creature / Per-Story Discussions & Reviews
+    // -------------------------------------------------------------------------
+    match /stories/{storyId} {
+      match /comments/{commentId} {
+        allow read: if true;
+
+        allow create: if isSignedIn()
+          && request.resource.data.storyId == storyId
+          && request.resource.data.authorUid == request.auth.uid
+          && (
+            (isAnonymous() && request.resource.data.authorRole == 'guest')
+            || (isAdmin() && request.resource.data.authorRole == 'admin')
+            || (isRegisteredUser() && !isAdmin() && request.resource.data.authorRole == 'user')
+          )
+          && (request.resource.data.pinned == false || isAdmin())
+          && request.resource.data.authorName is string
+          && request.resource.data.authorName.size() >= 2
+          && request.resource.data.authorName.size() <= 40
+          && request.resource.data.body is string
+          && request.resource.data.body.size() >= 1
+          && request.resource.data.body.size() <= 1000
+          && (request.resource.data.parentId == null || request.resource.data.parentId is string);
+
+        allow update: if (
+          isSignedIn()
+          && resource.data.authorUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'updatedAt'])
+          && request.resource.data.body is string
+          && request.resource.data.body.size() >= 1
+          && request.resource.data.body.size() <= 1000
+        ) || (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pinned', 'updatedAt'])
+          && request.resource.data.pinned is bool
+        );
+
+        allow delete: if (isSignedIn() && resource.data.authorUid == request.auth.uid) || isAdmin();
+      }
+
+      match /reviews/{reviewUid} {
+        allow read: if true;
+
+        allow create: if isRegisteredUser()
+          && reviewUid == request.auth.uid
+          && request.resource.data.storyId == storyId
+          && request.resource.data.authorUid == request.auth.uid
+          && (
+            (isAdmin() && request.resource.data.authorRole == 'admin')
+            || (!isAdmin() && request.resource.data.authorRole == 'user')
+          )
+          && request.resource.data.authorName is string
+          && request.resource.data.authorName.size() >= 1
+          && request.resource.data.authorName.size() <= 80
+          && request.resource.data.rating is int
+          && request.resource.data.rating >= 1
+          && request.resource.data.rating <= 5
+          && isValidReviewCategory(request.resource.data.category)
+          && request.resource.data.feedback is string
+          && request.resource.data.feedback.size() >= 5
+          && request.resource.data.feedback.size() <= 1000
+          && (request.resource.data.highlighted == false || isAdmin());
+
+        allow update: if (
+          isRegisteredUser()
+          && reviewUid == request.auth.uid
+          && resource.data.authorUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['rating', 'category', 'feedback', 'authorName', 'updatedAt'])
+          && request.resource.data.highlighted == resource.data.highlighted
+          && request.resource.data.rating is int
+          && request.resource.data.rating >= 1
+          && request.resource.data.rating <= 5
+          && isValidReviewCategory(request.resource.data.category)
+          && request.resource.data.feedback is string
+          && request.resource.data.feedback.size() >= 5
+          && request.resource.data.feedback.size() <= 1000
+        ) || (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['highlighted', 'updatedAt'])
+          && request.resource.data.highlighted is bool
+        );
+
+        allow delete: if (isRegisteredUser() && reviewUid == request.auth.uid) || isAdmin();
+      }
+    }
+  }
+}

@@ -58,7 +58,10 @@ export class World {
     this.container = container;
     this.report = report;
     this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-    this.highQuality = !this.reducedMotion.matches;
+    this.highQuality = config.highQuality ?? !this.reducedMotion.matches;
+    this.windMultiplier = 1;
+    this.builtinCreatures = Array.isArray(config.creatures) ? config.creatures : CREATURES;
+    this.communityRecords = [];
     this.map = new mapboxgl.Map({
       container, accessToken: config.mapboxToken, style: config.mapboxStyle || STYLE_URL,
       projection: 'mercator', bounds: PH_BOUNDS, fitBoundsOptions: { padding: 12 },
@@ -75,13 +78,40 @@ export class World {
     this.uniforms = this.water.material.uniforms;
     this.trails = [];
     this.clouds = [];
-    this.creatures = new CreatureSystem(this.scene, this.map, this.viewport);
-    this.creatures.setDefinitions(CREATURES);
+    this.creatures = new CreatureSystem(this.scene, this.map, this.viewport, config.communityMarker || '');
+    this._syncDefinitions();
     this._buildClouds();
     this.time = 0;
     this.lastFrame = nowSeconds();
     this.map.on('zoomend', this.syncPitch);
     this.reducedMotion.addEventListener('change', this.onMotionChange);
+  }
+
+  _syncDefinitions() {
+    this.creatures.setDefinitions([
+      ...this.builtinCreatures,
+      ...this.communityRecords.map((r) => ({ ...r, name: r.title || r.name, community: true })),
+    ]);
+  }
+
+  setBuiltinCreatures(creatures, communityMarker = '') {
+    if (Array.isArray(creatures)) {
+      this.builtinCreatures = creatures;
+    }
+    if (communityMarker) {
+      this.creatures.setCommunityMarker(communityMarker);
+    }
+    this._syncDefinitions();
+    if (!this.disposed) this.map.triggerRepaint();
+  }
+
+  setWindSpeed(windSpeedKmh) {
+    if (typeof windSpeedKmh === 'number' && Number.isFinite(windSpeedKmh) && windSpeedKmh >= 0) {
+      // Gently scale drifting cloud speed from calm (~0.65x) to windy (~2.4x).
+      this.windMultiplier = Math.max(0.65, Math.min(2.4, 0.65 + windSpeedKmh / 24));
+    } else {
+      this.windMultiplier = 1;
+    }
   }
 
   async load() {
@@ -103,6 +133,7 @@ export class World {
       const timeout = setTimeout(() => finish(new Error('Mapbox did not finish loading. Check the token, style URL and connection.')), 25000);
       this.cancelLoad = () => finish(new Error('Map closed.'));
       this.onError = (event) => {
+        if (this.disposed) return;
         const status = event.error?.status;
         if (event.sourceId === 'relief' && this.map.getSource('atlas-local-dem')) {
           this.useLocalElevation = true;
@@ -111,7 +142,7 @@ export class World {
         }
         if (event.sourceId) {
           this.report(event.sourceId === 'ph-coastline'
-            ? 'The local coastline could not load. Check assets/ph-coastline.json in the project folder.'
+            ? 'The local coastline could not load. Check public/assets/ph-coastline.json.'
             : 'Some hosted map details could not load. Check the connection or tileset access.');
           return;
         }
@@ -188,8 +219,6 @@ export class World {
       layers.find((l) => l.type === 'fill' && /^(land|landmass|land-base|land-fill)$/i.test(l.id));
     let before = land?.id;
     if (!before) {
-      // Streets and Standard often paint land as the background. Supply an
-      // actual opaque polygon mask in our stack, below the visible labels.
       const anchor = layers.find((l) => l.type === 'symbol')?.id;
       const slot = map.getSlots?.().includes('bottom') ? 'bottom' : undefined;
       if (!map.getSource('atlas-coast-mask')) map.addSource('atlas-coast-mask', { type: 'vector', url: 'mapbox://mapbox.country-boundaries-v1' });
@@ -202,8 +231,6 @@ export class World {
     map.addLayer({
       id: OCEAN, type: 'custom', renderingMode: '2d', slot: map.getSlot(before),
       render: (gl, matrix) => this.drawOcean(gl, matrix),
-      // Mapbox batches fills onto terrain tiles. Participate in the same
-      // drape so land covers water even when Studio enables 3D terrain.
       renderToTile: (gl, { x, y, z }) => {
         const s = 2 ** (z + 1);
         this.tileMatrix.set(s, 0, 0, -2 * x - 1, 0, s, 0, -2 * y - 1, 0, 0, 1, 0, 0, 0, 0, 1);
@@ -229,8 +256,6 @@ export class World {
   }
 
   makeRenderer(gl) {
-    // Three allocates a typed-array texture on construction. WebGL2 requires
-    // both unpack flags to be false for this upload, including on Safari.
     const flip = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL);
     const premultiply = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -246,8 +271,6 @@ export class World {
   }
 
   drawOcean(gl, matrix, tile = false) {
-    // Opaque vector fills may already have written Mapbox's sublayer depth.
-    // Keep the incoming depth range and LEQUAL test for the ocean quad.
     this.water.material.depthTest = !tile && gl.isEnabled(gl.DEPTH_TEST);
     this.uniforms.uTime.value = this.time;
     this.uniforms.uWakeWidth.value = 7.5 / (512 * 2 ** this.map.getZoom());
@@ -256,8 +279,6 @@ export class World {
   }
 
   draw(gl, matrix, scene) {
-    // r160 resetState unbinds both framebuffers and resets the viewport. The
-    // active target can be a terrain tile or a Mapbox offscreen framebuffer.
     const draw = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
     const read = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
     const viewport = gl.getParameter(gl.VIEWPORT);
@@ -351,7 +372,6 @@ export class World {
   respawnCloud(cloud, index) {
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
-    // Spread the five banks across the visible map, including after a close zoom.
     const x = width * (0.1 + (index + Math.random() * 0.6) * 0.16);
     const y = height * (0.12 + ((index * 3) % 5 + Math.random() * 0.6) * 0.15);
     const location = this.map.unproject([x, y]);
@@ -366,6 +386,7 @@ export class World {
 
   updateClouds(delta) {
     const worldPixels = 512 * 2 ** this.map.getZoom();
+    const windScale = this.windMultiplier || 1;
     for (const [index, cloud] of this.clouds.entries()) {
       const s = cloud.userData;
       const point = this.map.project([s.lng, s.lat]);
@@ -378,7 +399,7 @@ export class World {
       }
       const elevation = this.map.getTerrain() ? this.map.queryTerrainElevation([s.lng, s.lat]) || 0 : 0;
       cloud.position.z = mapboxgl.MercatorCoordinate.fromLngLat([s.lng, s.lat], elevation).z + 8 / worldPixels;
-      const step = s.speed * delta / worldPixels;
+      const step = (s.speed * windScale) * delta / worldPixels;
       cloud.position.x += step;
       cloud.position.y -= step * 0.18;
       s.lng += step * 360;
@@ -389,17 +410,18 @@ export class World {
   }
 
   setCommunityMyths(records) {
-    const approved = records.filter((r) => r.status === 'approved' && Number.isFinite(r.lat) && Number.isFinite(r.lng));
-    const signature = JSON.stringify(approved);
+    const approved = (records || []).filter((r) => r.status === 'approved' && Number.isFinite(r.lat) && Number.isFinite(r.lng));
+    const signature = JSON.stringify(approved.map((r) => [r.id, r.lat, r.lng, r.type, r.title]));
     if (signature === this.communitySignature) return;
     this.communitySignature = signature;
-    this.creatures.setDefinitions([...CREATURES, ...approved.map((r) => ({ ...r, name: r.title, community: true }))]);
-    this.map.triggerRepaint();
+    this.communityRecords = approved;
+    this._syncDefinitions();
+    if (!this.disposed) this.map.triggerRepaint();
   }
 
   setFilters(type, ids) {
     this.creatures.setFilters(type, ids);
-    this.map.triggerRepaint();
+    if (!this.disposed) this.map.triggerRepaint();
   }
 
   setHighQuality(on) {
@@ -411,7 +433,7 @@ export class World {
     this.lastFrame = nowSeconds();
     this.redrape = true;
     this.syncPitch();
-    this.map.triggerRepaint();
+    if (!this.disposed) this.map.triggerRepaint();
   }
 
   pitchAt(zoom) {
@@ -421,6 +443,7 @@ export class World {
   }
 
   syncPitch = () => {
+    if (this.disposed) return;
     const pitch = this.pitchAt(this.map.getZoom());
     if (Math.abs(this.map.getPitch() - pitch) > 0.1) {
       this.map.easeTo({ pitch, duration: this.highQuality && !this.reducedMotion.matches ? 300 : 0 });
@@ -429,17 +452,29 @@ export class World {
 
   onMotionChange = () => this.syncPitch();
 
+  zoomBy(delta) {
+    if (this.disposed) return;
+    this.map.zoomTo(this.map.getZoom() + delta, {
+      duration: this.highQuality && !this.reducedMotion.matches ? 250 : 0,
+    });
+  }
+
   focusOn(lat, lng) {
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (this.disposed || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const zoom = Math.max(this.map.getZoom(), 9.5);
-    this.map.easeTo({ center: [lng, lat], zoom, pitch: this.pitchAt(zoom),
+    this.map.easeTo({
+      center: [lng, lat], zoom, pitch: this.pitchAt(zoom),
       padding: readerPadding(this.container), retainPadding: false,
-      duration: this.highQuality && !this.reducedMotion.matches ? 850 : 0 });
+      duration: this.highQuality && !this.reducedMotion.matches ? 850 : 0,
+    });
   }
 
   fitCameraToWorld() {
-    this.map.fitBounds(PH_BOUNDS, { padding: 12, bearing: 0, pitch: 0, linear: true, retainPadding: false,
-      duration: this.highQuality && !this.reducedMotion.matches ? 600 : 0 });
+    if (this.disposed) return;
+    this.map.fitBounds(PH_BOUNDS, {
+      padding: 12, bearing: 0, pitch: 0, linear: true, retainPadding: false,
+      duration: this.highQuality && !this.reducedMotion.matches ? 600 : 0,
+    });
   }
 
   setEncounterOpen(open) {
@@ -448,7 +483,9 @@ export class World {
     if (!open && !this.disposed) this.map.triggerRepaint();
   }
 
-  resize() { this.map.resize(); }
+  resize() {
+    if (!this.disposed) this.map.resize();
+  }
 
   dispose() {
     if (this.disposed) return;
@@ -458,7 +495,13 @@ export class World {
     this.map.off('zoomend', this.syncPitch);
     if (this.onStyle) this.map.off('style.load', this.onStyle);
     if (this.onError) this.map.off('error', this.onError);
-    for (const id of [OVERLAY, OCEAN]) if (this.map.getLayer(id)) this.map.removeLayer(id);
+    for (const id of [OVERLAY, OCEAN]) {
+      try {
+        if (this.map.getStyle() && this.map.getLayer(id)) this.map.removeLayer(id);
+      } catch {
+        // Ignore teardown races when unmounting before style.load completes (StrictMode).
+      }
+    }
     this.creatures.dispose();
     for (const cloud of this.clouds) cloud.material.dispose();
     this.cloudTexture.dispose();
@@ -466,6 +509,11 @@ export class World {
     this.water.material.dispose();
     this.uniforms.uDistanceField.value.dispose();
     this.renderer?.dispose();
-    this.map.remove();
+    this.renderer = null;
+    try {
+      this.map.remove();
+    } catch {
+      // Ignore partial initialization cleanup errors.
+    }
   }
 }

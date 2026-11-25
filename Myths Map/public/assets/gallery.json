@@ -1,0 +1,92 @@
+{
+  "generatedAt": "2026-11-25T18:48:18.186Z",
+  "count": 17,
+  "communityMarker": "/assets/ink/community.png",
+  "creatures": {
+    "amdag": {
+      "banner": "/assets/banners/amdag.webp",
+      "marker": "/assets/ink/amdag.png",
+      "illustration": "/assets/amdag.png"
+    },
+    "amomongo": {
+      "banner": "/assets/banners/amomongo.webp",
+      "marker": "/assets/ink/amomongo.png",
+      "illustration": "/assets/amomongo.png"
+    },
+    "borak": {
+      "banner": "/assets/banners/borak.webp",
+      "marker": "/assets/ink/borak.png",
+      "illustration": "/assets/borak.png"
+    },
+    "buyagan": {
+      "banner": "/assets/banners/buyagan.webp",
+      "marker": "/assets/ink/buyagan.png",
+      "illustration": "/assets/buyagan.png"
+    },
+    "duwende": {
+      "banner": "/assets/banners/duwende.webp",
+      "marker": "/assets/ink/duwende.png",
+      "illustration": "/assets/duwende.png"
+    },
+    "janggu": {
+      "banner": "/assets/banners/janggu.webp",
+      "marker": "/assets/ink/janggu.png",
+      "illustration": "/assets/janggu.png"
+    },
+    "magindara": {
+      "banner": "/assets/banners/magindara.webp",
+      "marker": "/assets/ink/magindara.png",
+      "illustration": "/assets/magindara.png"
+    },
+    "manananggal": {
+      "banner": "/assets/banners/manananggal.webp",
+      "marker": "/assets/ink/manananggal.png",
+      "illustration": "/assets/manananggal.png"
+    },
+    "mangyan_nature_spirit": {
+      "banner": "/assets/banners/mangyan_nature_spirit.webp",
+      "marker": "/assets/ink/mangyan_nature_spirit.png",
+      "illustration": "/assets/mangyan_nature_spirit.png"
+    },
+    "mumu": {
+      "banner": "/assets/banners/mumu.webp",
+      "marker": "/assets/ink/mumu.png",
+      "illustration": "/assets/mumu.png"
+    },
+    "sarimanok": {
+      "banner": "/assets/banners/sarimanok.webp",
+      "marker": "/assets/ink/sarimanok.png",
+      "illustration": "/assets/sarimanok.png"
+    },
+    "sigbin": {
+      "banner": "/assets/banners/sigbin.webp",
+      "marker": "/assets/ink/sigbin.png",
+      "illustration": "/assets/sigbin.png"
+    },
+    "tambanokano": {
+      "banner": "/assets/banners/tambanokano.webp",
+      "marker": "/assets/ink/tambanokano.png",
+      "illustration": "/assets/tambanokano.png"
+    },
+    "tarabusaw": {
+      "banner": "/assets/banners/tarabusaw.webp",
+      "marker": "/assets/ink/tarabusaw.png",
+      "illustration": "/assets/tarabusaw.png"
+    },
+    "tikbalang": {
+      "banner": "/assets/banners/tikbalang.webp",
+      "marker": "/assets/ink/tikbalang.png",
+      "illustration": "/assets/tikbalang.png"
+    },
+    "tiyanak": {
+      "banner": "/assets/banners/tiyanak.webp",
+      "marker": "/assets/ink/tiyanak.png",
+      "illustration": "/assets/tiyanak.png"
+    },
+    "white_deer": {
+      "banner": "/assets/banners/white_deer.webp",
+      "marker": "/assets/ink/white_deer.png",
+      "illustration": "/assets/white_deer.png"
+    }
+  }
+}

@@ -18,13 +18,34 @@ export function billboard(texture, viewport, width, height = width) {
   return sprite;
 }
 
+function makeFallbackPinTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 48;
+  canvas.height = 48;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.beginPath();
+    ctx.arc(24, 24, 14, 0, Math.PI * 2);
+    ctx.fillStyle = '#b34f35';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#f7f3e9';
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 export class CreatureSystem {
-  constructor(scene, map, viewport) {
+  constructor(scene, map, viewport, communityMarker = '') {
     this.group = new THREE.Group();
     scene.add(this.group);
     this.map = map;
     this.viewport = viewport;
+    this.communityMarker = communityMarker;
     this.textures = new Map();
+    this.fallbackTexture = makeFallbackPinTexture();
     this.sprites = new Map();
     this.active = [];
     this.filterType = 'all';
@@ -32,12 +53,37 @@ export class CreatureSystem {
     this.loader = new THREE.TextureLoader();
   }
 
+  setCommunityMarker(url) {
+    if (!url || url === this.communityMarker) return;
+    this.communityMarker = url;
+    for (const sprite of this.sprites.values()) {
+      const story = sprite.userData.story;
+      if (story?.community) {
+        sprite.material.uniforms.uMap.value = this.textureFor(story);
+        sprite.userData.textureUrl = url;
+      }
+    }
+    if (!this.disposed) this.map.triggerRepaint();
+  }
+
+  textureUrlFor(story) {
+    return story.community ? this.communityMarker : (story.marker || '');
+  }
+
   textureFor(story) {
-    const url = story.community ? 'assets/ink/community.png' : story.marker;
+    const url = this.textureUrlFor(story);
+    if (!url) return this.fallbackTexture;
     if (!this.textures.has(url)) {
-      const image = this.loader.load(url, () => {
-        if (!this.disposed) this.map.triggerRepaint();
-      });
+      const image = this.loader.load(
+        url,
+        () => {
+          if (!this.disposed) this.map.triggerRepaint();
+        },
+        undefined,
+        () => {
+          // Keep fallback visual if an image fails to load.
+        }
+      );
       image.colorSpace = THREE.SRGBColorSpace;
       this.textures.set(url, image);
     }
@@ -45,7 +91,7 @@ export class CreatureSystem {
   }
 
   setDefinitions(definitions) {
-    const retained = new Set(definitions.map(c => c.id));
+    const retained = new Set(definitions.map((c) => c.id));
     for (const [id, sprite] of this.sprites) {
       if (!retained.has(id)) {
         this.group.remove(sprite);
@@ -55,11 +101,16 @@ export class CreatureSystem {
     }
     for (const story of definitions) {
       let sprite = this.sprites.get(story.id);
+      const nextUrl = this.textureUrlFor(story);
       if (!sprite) {
         sprite = billboard(this.textureFor(story), this.viewport, 48);
         sprite.userData.phase = Math.random() * Math.PI * 2;
+        sprite.userData.textureUrl = nextUrl;
         this.group.add(sprite);
         this.sprites.set(story.id, sprite);
+      } else if (sprite.userData.textureUrl !== nextUrl) {
+        sprite.material.uniforms.uMap.value = this.textureFor(story);
+        sprite.userData.textureUrl = nextUrl;
       }
       const anchor = mapboxgl.MercatorCoordinate.fromLngLat([story.lng, story.lat], 0);
       sprite.position.set(anchor.x - ORIGIN[0], anchor.y - ORIGIN[1], anchor.z);
@@ -121,6 +172,7 @@ export class CreatureSystem {
     this.disposed = true;
     for (const sprite of this.sprites.values()) sprite.material.dispose();
     for (const texture of this.textures.values()) texture.dispose();
+    this.fallbackTexture.dispose();
     this.group.clear();
     this.sprites.clear();
     this.textures.clear();

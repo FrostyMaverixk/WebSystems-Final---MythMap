@@ -1,12 +1,29 @@
 {
   "name": "myths-map",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "A Philippine folklore atlas with administrator, explorer and guest accounts.",
+  "description": "Philippine Mythology Interactive Atlas — React 19 + Vite + Firebase Spark Plan.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "node server.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "bake:gallery": "node scripts/bake-gallery.mjs",
+    "bake:distance-field": "node scripts/bake-distance-field.mjs",
+    "predev": "npm run bake:gallery",
+    "dev": "vite",
+    "prebuild": "npm run bake:gallery",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --import ./tests/three-loader.mjs --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "firebase": "^11.6.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "vite": "^6.3.5"
   }
 }

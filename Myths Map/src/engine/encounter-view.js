@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { createEncounterModel, makeEnvironment, setHabitat, habitatOf } from './encounter-scene.js';
+import { createEncounterModel, makeEnvironment, setAtmosphereTint, setHabitat, habitatOf } from './encounter-scene.js';
 
 const clamp = THREE.MathUtils.clamp;
 
 export class EncounterView {
-  constructor(onClose) {
-    this.dialog = document.getElementById('encounter-view');
-    this.canvas = document.getElementById('encounter-canvas');
+  constructor({ dialog, canvas, onClose }) {
+    this.dialog = dialog;
+    this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     this.environment = makeEnvironment();
@@ -17,13 +17,13 @@ export class EncounterView {
     this.media = matchMedia('(prefers-reduced-motion: reduce)');
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.canvas);
-    this.onClose = onClose;
+    this.onClose = onClose || (() => {});
+    this.effects = true;
+    this.isDay = 1;
+
     const listen = (target, type, fn, options) =>
       target.addEventListener(type, fn, { ...options, signal: this.controls.signal });
     listen(this.dialog, 'close', () => { if (!this.dialog.open) this.releaseModel(); });
-    listen(document.getElementById('return-to-map'), 'click', () => this.close());
-    listen(document.getElementById('encounter-in'), 'click', () => this.zoom(1.15));
-    listen(document.getElementById('encounter-out'), 'click', () => this.zoom(1 / 1.15));
     listen(this.media, 'change', () => this.refreshMotion());
     listen(this.canvas, 'wheel', (event) => {
       event.preventDefault();
@@ -66,10 +66,12 @@ export class EncounterView {
     });
   }
 
-  open(story, effects) {
-    this.releaseModel();
+  open(story, effects, { isDay = 1 } = {}) {
+    this.releaseModel(false);
     this.model = createEncounterModel(story.id);
-    setHabitat(this.environment, habitatOf(story));
+    this.effects = effects;
+    this.isDay = isDay;
+    setHabitat(this.environment, habitatOf(story), { isDay, effects });
     this.environment.scene.add(this.model.group);
     const bounds = new THREE.Box3().setFromObject(this.model.group);
     bounds.getCenter(this.target);
@@ -78,10 +80,15 @@ export class EncounterView {
     this.elevation = 0.06;
     this.magnification = 1;
     this.elapsed = 0;
-    this.effects = effects;
-    document.getElementById('encounter-title').textContent = story.name;
-    this.dialog.showModal();
+    if (!this.dialog.open) this.dialog.showModal();
     this.resize();
+    this.refreshMotion();
+  }
+
+  setAtmosphere({ effects, isDay }) {
+    if (effects !== undefined) this.effects = effects;
+    if (isDay !== undefined) this.isDay = isDay;
+    setAtmosphereTint(this.environment, { effects: this.effects, isDay: this.isDay });
     this.refreshMotion();
   }
 
@@ -117,8 +124,11 @@ export class EncounterView {
     const distance = Math.max(4.5, fit) / this.magnification + approach * 3;
     const angle = this.elevation + approach * 0.24;
     const horizontal = Math.cos(angle) * distance;
-    camera.position.set(this.target.x + Math.sin(this.yaw) * horizontal, this.target.y + Math.sin(angle) * distance,
-      this.target.z + Math.cos(this.yaw) * horizontal);
+    camera.position.set(
+      this.target.x + Math.sin(this.yaw) * horizontal,
+      this.target.y + Math.sin(angle) * distance,
+      this.target.z + Math.cos(this.yaw) * horizontal
+    );
     camera.lookAt(this.target);
     this.model.animate(this.elapsed);
     this.renderer.render(scene, camera);
@@ -139,23 +149,26 @@ export class EncounterView {
     this.draw();
   }
 
-  releaseModel() {
+  releaseModel(notify = true) {
     if (!this.model) return;
     this.renderer.setAnimationLoop(null);
     this.environment.scene.remove(this.model.group);
     this.model.dispose();
     this.model = null;
     this.pointers.clear();
-    this.onClose();
+    if (notify) this.onClose();
   }
 
   close() {
     if (this.dialog.open) this.dialog.close();
-    this.releaseModel();
+    this.releaseModel(true);
   }
 
   dispose() {
-    this.close();
+    if (this.disposed) return;
+    this.disposed = true;
+    this.releaseModel(false);
+    if (this.dialog.open) this.dialog.close();
     this.controls.abort();
     this.resizeObserver.disconnect();
     const geometries = new Set(), materials = new Set();
@@ -164,8 +177,8 @@ export class EncounterView {
       if (object.material) materials.add(object.material);
       if (object.isInstancedMesh) object.dispose();
     });
-    geometries.forEach(g => g.dispose());
-    materials.forEach(m => m.dispose());
+    geometries.forEach((g) => g.dispose());
+    materials.forEach((m) => m.dispose());
     this.renderer.dispose();
     this.renderer.forceContextLoss();
   }

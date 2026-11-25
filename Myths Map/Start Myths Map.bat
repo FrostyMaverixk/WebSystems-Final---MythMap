@@ -6,7 +6,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Open http://127.0.0.1:3000 in your browser.
+echo Open http://127.0.0.1:5173 in your browser.
 echo Keep this window open while using Myths Map.
-node server.mjs
+call npm run dev
 pause
