@@ -24,7 +24,7 @@ export const WATER_VERT = `
 `;
 
 export const WATER_FRAG = `
-  uniform float uTime, uWakeWidth, uCursorActive;
+  uniform float uTime, uWakeWidth, uCursorActive, uSwell;
   uniform int uActiveTrails;
   uniform vec2 uOrigin, uCursorWorld, uFieldMin, uFieldScale;
   uniform vec3 uDeep, uMid, uShallow;
@@ -76,7 +76,7 @@ export const WATER_FRAG = `
     float n1 = fbm(p);
     vec2 grad = n1 - vec2(fbm(p + vec2(0.2, 0.0)), fbm(p + vec2(0.0, 0.2)));
     vec2 push = displacement * vec2(TAU, -TAU);
-    vec3 normal = normalize(vec3(-push * 30.0 + grad * 5.0, 1.0));
+    vec3 normal = normalize(vec3(-push * 30.0 + grad * (5.0 * uSwell), 1.0));
     vec3 lightDir = normalize(vec3(0.5, 0.8, 0.6));
     vec3 halfVec = normalize(lightDir + vec3(0.0, 0.0, 1.0));
     float diffuse = max(dot(normal, lightDir), 0.0);

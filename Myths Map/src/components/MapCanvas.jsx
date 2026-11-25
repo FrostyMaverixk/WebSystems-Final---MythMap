@@ -41,6 +41,7 @@ export const MapCanvas = forwardRef(function MapCanvas(
     placingPin,
     canWrite,
     windSpeed,
+    waveHeight,
     encounterOpen,
     statusOverride,
     onToggleQuality,
@@ -87,6 +88,7 @@ export const MapCanvas = forwardRef(function MapCanvas(
     filteredIds,
     highQuality,
     windSpeed,
+    waveHeight,
     encounterOpen,
   });
   initialPropsRef.current = {
@@ -97,6 +99,7 @@ export const MapCanvas = forwardRef(function MapCanvas(
     filteredIds,
     highQuality,
     windSpeed,
+    waveHeight,
     encounterOpen,
   };
 
@@ -197,6 +200,7 @@ export const MapCanvas = forwardRef(function MapCanvas(
         localWorld.setFilters(latest.filterType, latest.filteredIds);
         localWorld.setHighQuality(latest.highQuality);
         localWorld.setWindSpeed(latest.windSpeed);
+        localWorld.setWaveHeight(latest.waveHeight);
         localWorld.setEncounterOpen(latest.encounterOpen);
 
         worldRef.current = localWorld;
@@ -264,6 +268,10 @@ export const MapCanvas = forwardRef(function MapCanvas(
   useEffect(() => {
     worldRef.current?.setWindSpeed(windSpeed);
   }, [windSpeed, worldVersion]);
+
+  useEffect(() => {
+    worldRef.current?.setWaveHeight(waveHeight);
+  }, [waveHeight, worldVersion]);
 
   useEffect(() => {
     worldRef.current?.setEncounterOpen(encounterOpen);

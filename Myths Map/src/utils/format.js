@@ -45,3 +45,33 @@ export function statusLabel(status) {
       return 'Awaiting review';
   }
 }
+
+export function formatAtmosphereSummary({ weather, marine, moonPhase } = {}) {
+  if (weather) {
+    const parts = [`${weather.temperature}°C`, weather.label, weather.dayPeriod];
+    if (moonPhase?.name) parts.push(`${moonPhase.icon} ${moonPhase.name}`);
+    if (marine?.waveHeight != null) parts.push(`🌊 ${marine.waveHeight} m`);
+
+    const tipParts = [`Wind ${Math.round(weather.windSpeed || 0)} km/h`];
+    if (marine?.seaState) tipParts.push(`${marine.seaState} (${marine.compass})`);
+    tipParts.push('Open-Meteo.com');
+
+    return {
+      icon: weather.icon,
+      text: parts.join(' · '),
+      tooltip: tipParts.join(' · '),
+    };
+  }
+
+  if (moonPhase?.name) {
+    const parts = [`${moonPhase.icon} ${moonPhase.name}`];
+    if (marine?.waveHeight != null) parts.push(`🌊 ${marine.waveHeight} m`);
+    return {
+      icon: moonPhase.icon,
+      text: parts.join(' · '),
+      tooltip: 'Current lunar phase',
+    };
+  }
+
+  return null;
+}

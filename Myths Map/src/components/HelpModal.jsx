@@ -59,15 +59,27 @@ export function HelpModal({ isOpen, onClose }) {
           Map locations are illustrative. Folklore varies across communities; credit your sources
           when sharing.
           <br />
-          Live weather &amp; atmosphere sync:{' '}
+          Live weather &amp; marine swells:{' '}
           <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">
-            Weather data by Open-Meteo.com
+            Open-Meteo.com
           </a>{' '}
-          (CC BY 4.0). Cultural summaries via{' '}
+          (CC BY 4.0). Sunrise &amp; sunset times:{' '}
+          <a href="https://sunrise-sunset.org/" target="_blank" rel="noopener noreferrer">
+            Sunrise-Sunset.org
+          </a>
+          . Cultural summaries &amp; archival images via{' '}
           <a href="https://en.wikipedia.org/" target="_blank" rel="noopener noreferrer">
             Wikipedia
           </a>{' '}
-          (CC BY-SA 4.0). Relief tiles: Mapzen, USGS, NOAA.
+          &amp;{' '}
+          <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">
+            Wikimedia Commons
+          </a>{' '}
+          (CC BY-SA 4.0). Folklore literature via{' '}
+          <a href="https://openlibrary.org/" target="_blank" rel="noopener noreferrer">
+            Open Library
+          </a>
+          . Relief tiles: Mapzen, USGS, NOAA.
         </p>
       </section>
     </div>

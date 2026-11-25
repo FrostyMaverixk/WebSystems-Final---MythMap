@@ -735,6 +735,52 @@ function groundHeight(x, z, habitat) {
   return hills - (habitat === 'coast' ? smooth(clamp((-z - 2) / 12, 0, 1)) * 2 : 0);
 }
 
+export function classifyWeatherCode(weatherCode) {
+  const code = Number(weatherCode);
+  if (code === 2) return 'partly_cloudy';
+  if (code === 3) return 'overcast';
+  if (code === 45) return 'mist';
+  if (code === 48) return 'dense_fog';
+  if (code === 51 || code === 53) return 'light_drizzle';
+  if (code === 55 || code === 61 || code === 80) return 'light_rain';
+  if (code === 63 || code === 65 || code === 81 || code === 82) return 'heavy_rain';
+  if (code === 95 || code === 96 || code === 99) return 'thunderstorm';
+  return 'clear';
+}
+
+function makeMistTexture() {
+  if (typeof document === 'undefined') {
+    const tex = new THREE.DataTexture(new Uint8Array([255, 255, 255, 175]), 1, 1, THREE.RGBAFormat);
+    tex.needsUpdate = true;
+    return tex;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.save();
+    ctx.translate(48, 32);
+    ctx.scale(44, 28);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, 'rgba(255, 255, 255, 0.72)');
+    g.addColorStop(0.5, 'rgba(255, 255, 255, 0.32)');
+    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const MAX_RAIN_DROPS = 320;
+const MIST_COUNT = 18;
+const CLOUD_COUNT = 9;
+
 export function makeEnvironment() {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 240);
@@ -742,6 +788,8 @@ export function makeEnvironment() {
   const sunlight = new THREE.DirectionalLight(0xffe3b7, 2.6);
   sunlight.position.set(-14, 22, 12);
   scene.add(hemisphere, sunlight);
+
+  const textures = [];
 
   // One indexed grid: 3,872 triangles, updated in place when the habitat changes.
   const geometry = new THREE.BufferGeometry();
@@ -787,22 +835,209 @@ export function makeEnvironment() {
   contact.position.y = 0.012;
   contact.scale.set(1.5, 0.7, 1);
   scene.add(contact);
-  return { scene, camera, hemisphere, sunlight, terrain, water, contact, trunk, canopy, rocks, grass, ridges, habitat: null, nightTint: false };
+
+  // Live sky, lunar phase, cloud, mist, and rain weather layers.
+  const skyRng = randomFor('encounter-weather-sky');
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(140 * 3);
+  for (let i = 0; i < 140; i++) {
+    const theta = skyRng() * Math.PI * 2;
+    const phi = 0.14 + skyRng() * 0.95;
+    const r = 82 + skyRng() * 14;
+    starPos[i * 3] = Math.cos(theta) * Math.cos(phi) * r;
+    starPos[i * 3 + 1] = Math.sin(phi) * r + 4;
+    starPos[i * 3 + 2] = Math.sin(theta) * Math.cos(phi) * r;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(
+    starGeo,
+    new THREE.PointsMaterial({ color: 0xf7eed2, size: 0.48, transparent: true, opacity: 0.85, fog: false })
+  );
+  stars.visible = false;
+  scene.add(stars);
+
+  const sunDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(3.4, 24),
+    new THREE.MeshBasicMaterial({ color: 0xfff0c8, fog: false, transparent: true, opacity: 0.92 })
+  );
+  sunDisc.position.set(-18, 28, -72);
+  scene.add(sunDisc);
+
+  const moonGroup = new THREE.Group();
+  moonGroup.position.set(-18, 26, -68);
+  const moonHalo = new THREE.Mesh(
+    new THREE.CircleGeometry(5.6, 24),
+    new THREE.MeshBasicMaterial({ color: 0xdce7f5, transparent: true, opacity: 0.16, fog: false, depthWrite: false })
+  );
+  const moonDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(3.1, 24),
+    new THREE.MeshBasicMaterial({ color: 0xf5ebd0, fog: false })
+  );
+  moonDisc.position.z = 0.04;
+  const moonShadowMat = new THREE.MeshBasicMaterial({ color: 0x1f3447, fog: false });
+  const moonShadow = new THREE.Mesh(new THREE.CircleGeometry(3.18, 24), moonShadowMat);
+  moonShadow.position.z = 0.08;
+  moonGroup.add(moonHalo, moonDisc, moonShadow);
+  moonGroup.visible = false;
+  scene.add(moonGroup);
+
+  const cloudGroup = new THREE.Group();
+  const cloudGeo = new THREE.IcosahedronGeometry(1, 0);
+  const cloudMat = new THREE.MeshStandardMaterial({
+    color: 0xf4f1e6,
+    roughness: 1,
+    flatShading: true,
+    transparent: true,
+    opacity: 0.85,
+  });
+  for (let i = 0; i < CLOUD_COUNT; i++) {
+    const cluster = new THREE.Group();
+    const scale = 2.6 + skyRng() * 2.2;
+    cluster.position.set(-64 + i * 16 + skyRng() * 6, 17 + skyRng() * 8, -20 - skyRng() * 34);
+    cluster.userData = { speed: 0.9 + skyRng() * 0.7, baseY: cluster.position.y, phase: skyRng() * Math.PI * 2 };
+    for (const [ox, oy, oz, s] of [[-1.1, -0.1, 0, 0.8], [0, 0.25, 0.1, 1.15], [1.2, -0.15, -0.1, 0.85]]) {
+      const puff = new THREE.Mesh(cloudGeo, cloudMat);
+      puff.position.set(ox * scale, oy * scale, oz * scale);
+      puff.scale.set(scale * s * 1.4, scale * s * 0.65, scale * s);
+      cluster.add(puff);
+    }
+    cloudGroup.add(cluster);
+  }
+  cloudGroup.visible = false;
+  scene.add(cloudGroup);
+
+  const mistTexture = makeMistTexture();
+  textures.push(mistTexture);
+  const mistGroup = new THREE.Group();
+  const mistGeo = new THREE.PlaneGeometry(1, 1);
+  const mistMat = new THREE.MeshBasicMaterial({
+    map: mistTexture,
+    color: 0xe6ece7,
+    transparent: true,
+    opacity: 0.34,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  for (let i = 0; i < MIST_COUNT; i++) {
+    const wisp = new THREE.Mesh(mistGeo, mistMat);
+    const angle = (i / MIST_COUNT) * Math.PI * 2 + skyRng() * 0.35;
+    const radius = 6.5 + skyRng() * 19;
+    const baseY = 0.75 + skyRng() * 3.6;
+    const width = 9 + skyRng() * 9;
+    wisp.scale.set(width, width * 0.42, 1);
+    wisp.position.set(Math.cos(angle) * radius, baseY, Math.sin(angle) * radius);
+    wisp.lookAt(0, baseY, 0);
+    wisp.userData = { angle, radius, baseY, angularSpeed: 0.025 + skyRng() * 0.03, phase: skyRng() * Math.PI * 2 };
+    mistGroup.add(wisp);
+  }
+  mistGroup.visible = false;
+  scene.add(mistGroup);
+
+  const rainGeo = new THREE.BufferGeometry();
+  const rainPos = new Float32Array(MAX_RAIN_DROPS * 2 * 3);
+  const rainSeeds = [];
+  for (let i = 0; i < MAX_RAIN_DROPS; i++) {
+    const x = (skyRng() - 0.5) * 34;
+    const y = skyRng() * 24;
+    const z = (skyRng() - 0.5) * 34;
+    const speedVar = 0.85 + skyRng() * 0.35;
+    rainSeeds.push({ x, y, z, speedVar });
+    rainPos[i * 6] = x;
+    rainPos[i * 6 + 1] = y;
+    rainPos[i * 6 + 2] = z;
+    rainPos[i * 6 + 3] = x - 0.08;
+    rainPos[i * 6 + 4] = y + 0.6;
+    rainPos[i * 6 + 5] = z;
+  }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  rainGeo.setDrawRange(0, 0);
+  const rainMat = new THREE.LineBasicMaterial({
+    color: 0xd9e8ef,
+    transparent: true,
+    opacity: 0.5,
+  });
+  const rainLines = new THREE.LineSegments(rainGeo, rainMat);
+  rainLines.visible = false;
+  scene.add(rainLines);
+
+  return {
+    scene,
+    camera,
+    hemisphere,
+    sunlight,
+    terrain,
+    water,
+    contact,
+    trunk,
+    canopy,
+    rocks,
+    grass,
+    ridges,
+    stars,
+    sunDisc,
+    moonGroup,
+    moonShadow,
+    moonShadowMat,
+    cloudGroup,
+    cloudMat,
+    mistGroup,
+    mistMat,
+    rainLines,
+    rainMat,
+    rainSeeds,
+    textures,
+    habitat: null,
+    nightTint: false,
+    atmosphere: {
+      isDay: 1,
+      weatherCode: 0,
+      kind: 'clear',
+      windSpeed: 10,
+      rainSpeed: 0,
+      rainLength: 0.5,
+      waveHeight: null,
+      baseSkyHex: PALETTES.forest.sky,
+      baseSunIntensity: 2.6,
+    },
+  };
 }
 
-export function setAtmosphereTint(resources, { isDay = 1, effects = true } = {}) {
-  const night = Boolean(effects && isDay === 0);
+function applyMoonPhaseGeometry(resources, moonPhaseName = '') {
+  const name = String(moonPhaseName || '').toLowerCase();
+  const shadow = resources.moonShadow;
+  if (!shadow) return;
+  if (!name || name.includes('full')) {
+    shadow.visible = false;
+    return;
+  }
+  shadow.visible = true;
+  if (name.includes('new')) shadow.position.x = 0;
+  else if (name.includes('waxing crescent')) shadow.position.x = -1.15;
+  else if (name.includes('first quarter')) shadow.position.x = -3.1;
+  else if (name.includes('waxing gibbous')) shadow.position.x = -4.65;
+  else if (name.includes('waning gibbous')) shadow.position.x = 4.65;
+  else if (name.includes('last quarter')) shadow.position.x = 3.1;
+  else if (name.includes('waning crescent')) shadow.position.x = 1.15;
+  else shadow.visible = false;
+}
+
+export function setAtmosphereTint(
+  resources,
+  { isDay = 1, weatherCode = 0, windSpeed = 10, moonPhase = null, waveHeight = null } = {}
+) {
+  const night = isDay === 0;
+  const kind = classifyWeatherCode(weatherCode);
   resources.nightTint = night;
   const palette = PALETTES[resources.habitat] || PALETTES.forest;
   const sky = new THREE.Color(palette.sky);
+
   if (night) {
-    // Subtle twilight/dusk tint synced with Open-Meteo is_day === 0
-    sky.lerp(new THREE.Color(0x1f3447), 0.52);
-    resources.hemisphere.color.setHex(0x8fa9c4);
-    resources.hemisphere.groundColor.setHex(0x283238);
-    resources.hemisphere.intensity = 1.65;
-    resources.sunlight.color.setHex(0xcfd8f0);
-    resources.sunlight.intensity = 1.75;
+    sky.lerp(new THREE.Color(0x182b3b), 0.62);
+    resources.hemisphere.color.setHex(0x88a4c2);
+    resources.hemisphere.groundColor.setHex(0x252f36);
+    resources.hemisphere.intensity = 1.55;
+    resources.sunlight.color.setHex(0xc6d4f0);
+    resources.sunlight.intensity = 1.65;
   } else {
     resources.hemisphere.color.setHex(0xe8eee0);
     resources.hemisphere.groundColor.setHex(0x4a5140);
@@ -810,8 +1045,221 @@ export function setAtmosphereTint(resources, { isDay = 1, effects = true } = {})
     resources.sunlight.color.setHex(0xffe3b7);
     resources.sunlight.intensity = 2.6;
   }
+
+  // Modulate lighting & sky color by live weather phenomenon
+  let fogNear = 42;
+  let fogFar = 135;
+  let activeClouds = 0;
+  let activeMist = 0;
+  let mistOpacity = 0;
+  let rainDrops = 0;
+  let rainOpacity = 0;
+  let rainSpeed = 0;
+  let rainLength = 0.5;
+
+  if (kind === 'partly_cloudy') {
+    activeClouds = 5;
+  } else if (kind === 'overcast') {
+    sky.lerp(new THREE.Color(night ? 0x24333d : 0x9aa9a6), 0.38);
+    resources.sunlight.intensity *= 0.72;
+    fogNear = 28;
+    fogFar = 105;
+    activeClouds = CLOUD_COUNT;
+  } else if (kind === 'mist') {
+    sky.lerp(new THREE.Color(night ? 0x3b4d57 : 0xcdd7d1), 0.58);
+    resources.sunlight.intensity *= 0.68;
+    fogNear = 7;
+    fogFar = 36;
+    activeMist = 14;
+    mistOpacity = 0.36;
+    activeClouds = 5;
+  } else if (kind === 'dense_fog') {
+    sky.lerp(new THREE.Color(night ? 0x43545c : 0xd6dfd8), 0.72);
+    resources.sunlight.intensity *= 0.52;
+    fogNear = 4;
+    fogFar = 22;
+    activeMist = MIST_COUNT;
+    mistOpacity = 0.52;
+    activeClouds = CLOUD_COUNT;
+  } else if (kind === 'light_drizzle') {
+    sky.lerp(new THREE.Color(night ? 0x223340 : 0x96a8ab), 0.42);
+    resources.sunlight.intensity *= 0.7;
+    fogNear = 18;
+    fogFar = 72;
+    activeClouds = CLOUD_COUNT;
+    activeMist = 6;
+    mistOpacity = 0.18;
+    rainDrops = 95;
+    rainOpacity = 0.36;
+    rainSpeed = 9;
+    rainLength = 0.45;
+  } else if (kind === 'light_rain') {
+    sky.lerp(new THREE.Color(night ? 0x1e2e3b : 0x84979b), 0.52);
+    resources.sunlight.intensity *= 0.6;
+    fogNear = 16;
+    fogFar = 64;
+    activeClouds = CLOUD_COUNT;
+    activeMist = 6;
+    mistOpacity = 0.22;
+    rainDrops = 185;
+    rainOpacity = 0.5;
+    rainSpeed = 14;
+    rainLength = 0.75;
+  } else if (kind === 'heavy_rain') {
+    sky.lerp(new THREE.Color(night ? 0x172430 : 0x6f8389), 0.62);
+    resources.sunlight.intensity *= 0.5;
+    fogNear = 14;
+    fogFar = 54;
+    activeClouds = CLOUD_COUNT;
+    activeMist = 8;
+    mistOpacity = 0.26;
+    rainDrops = 270;
+    rainOpacity = 0.64;
+    rainSpeed = 19;
+    rainLength = 1.05;
+  } else if (kind === 'thunderstorm') {
+    sky.lerp(new THREE.Color(night ? 0x101a24 : 0x4d5d66), 0.72);
+    resources.sunlight.intensity *= 0.45;
+    fogNear = 12;
+    fogFar = 48;
+    activeClouds = CLOUD_COUNT;
+    activeMist = 8;
+    mistOpacity = 0.25;
+    rainDrops = MAX_RAIN_DROPS;
+    rainOpacity = 0.74;
+    rainSpeed = 24;
+    rainLength = 1.25;
+  }
+
   resources.scene.background = sky;
-  resources.scene.fog = new THREE.Fog(sky, 42, 135);
+  resources.scene.fog = new THREE.Fog(sky, fogNear, fogFar);
+  if (resources.moonShadowMat) resources.moonShadowMat.color.copy(sky);
+
+  if (resources.stars) {
+    resources.stars.visible = night && (kind === 'clear' || kind === 'partly_cloudy');
+  }
+  if (resources.sunDisc) {
+    resources.sunDisc.visible = !night && (kind === 'clear' || kind === 'partly_cloudy');
+  }
+  if (resources.moonGroup) {
+    resources.moonGroup.visible = night && kind !== 'dense_fog';
+    applyMoonPhaseGeometry(resources, moonPhase?.name);
+  }
+  if (resources.cloudGroup) {
+    resources.cloudGroup.visible = activeClouds > 0;
+    resources.cloudMat.color.setHex(
+      kind === 'thunderstorm' || kind === 'heavy_rain'
+        ? 0x6c7880
+        : night
+        ? 0x8ea0b2
+        : 0xf4f1e6
+    );
+    resources.cloudGroup.children.forEach((child, idx) => {
+      child.visible = idx < activeClouds;
+    });
+  }
+  if (resources.mistGroup) {
+    resources.mistGroup.visible = activeMist > 0;
+    resources.mistMat.opacity = mistOpacity;
+    resources.mistMat.color.setHex(night ? 0x99aeb8 : 0xe9efea);
+    resources.mistGroup.children.forEach((child, idx) => {
+      child.visible = idx < activeMist;
+    });
+  }
+  if (resources.rainLines) {
+    resources.rainLines.visible = rainDrops > 0;
+    resources.rainMat.opacity = rainOpacity;
+    resources.rainMat.color.setHex(night ? 0xaec6da : 0xe2eef2);
+    resources.rainLines.geometry.setDrawRange(0, rainDrops * 2);
+  }
+
+  resources.atmosphere = {
+    isDay,
+    weatherCode,
+    kind,
+    windSpeed: Number.isFinite(Number(windSpeed)) ? Number(windSpeed) : 10,
+    rainSpeed,
+    rainLength,
+    waveHeight,
+    baseSkyHex: sky.getHex(),
+    baseSunIntensity: resources.sunlight.intensity,
+  };
+}
+
+export function updateEncounterAtmosphere(resources, elapsed = 0, delta = 0, animate = true) {
+  const atmo = resources?.atmosphere;
+  if (!atmo) return;
+
+  const windScale = Math.max(0.4, Math.min(2.6, (atmo.windSpeed || 10) / 12));
+
+  if (animate && resources.cloudGroup?.visible && delta > 0) {
+    for (const cluster of resources.cloudGroup.children) {
+      if (!cluster.visible) continue;
+      cluster.position.x += cluster.userData.speed * windScale * delta;
+      if (cluster.position.x > 76) cluster.position.x = -76;
+      cluster.position.y =
+        cluster.userData.baseY + Math.sin(elapsed * 0.35 + cluster.userData.phase) * 0.25;
+    }
+  }
+
+  if (animate && resources.mistGroup?.visible && delta > 0) {
+    for (const wisp of resources.mistGroup.children) {
+      if (!wisp.visible) continue;
+      wisp.userData.angle += wisp.userData.angularSpeed * windScale * delta;
+      const a = wisp.userData.angle;
+      const r = wisp.userData.radius;
+      const y = wisp.userData.baseY + Math.sin(elapsed * 0.7 + wisp.userData.phase) * 0.28;
+      wisp.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
+      wisp.lookAt(0, y, 0);
+    }
+  }
+
+  if (resources.rainLines?.visible) {
+    const pos = resources.rainLines.geometry.attributes.position;
+    const len = atmo.rainLength || 0.6;
+    const slant = -len * 0.14 * windScale;
+    const stepY = animate ? (atmo.rainSpeed || 12) * delta : 0;
+    const stepX = slant * (animate ? delta * 8 : 0);
+
+    for (let i = 0; i < resources.rainSeeds.length; i++) {
+      const drop = resources.rainSeeds[i];
+      if (stepY > 0) {
+        drop.y -= stepY * drop.speedVar;
+        drop.x += stepX * drop.speedVar;
+        if (drop.y < -0.5) {
+          drop.y = 23 + (drop.y % 1);
+          drop.x = ((drop.x + 17) % 34 + 34) % 34 - 17;
+        }
+      }
+      const idx = i * 6;
+      pos.array[idx] = drop.x;
+      pos.array[idx + 1] = drop.y;
+      pos.array[idx + 2] = drop.z;
+      pos.array[idx + 3] = drop.x - slant;
+      pos.array[idx + 4] = drop.y + len;
+      pos.array[idx + 5] = drop.z;
+    }
+    pos.needsUpdate = true;
+  }
+
+  if (resources.water?.visible && animate) {
+    const amp = atmo.waveHeight != null ? Math.min(0.18, 0.04 + atmo.waveHeight * 0.07) : 0.05;
+    resources.water.position.y = -0.22 + Math.sin(elapsed * 1.4) * amp;
+  }
+
+  if (atmo.kind === 'thunderstorm' && animate) {
+    // Occasional distant lightning flash
+    const cycle = elapsed % 5.7;
+    const flash = cycle > 5.38 && cycle < 5.5 ? 1 : cycle > 5.56 && cycle < 5.64 ? 0.65 : 0;
+    resources.sunlight.intensity = atmo.baseSunIntensity + flash * 3.8;
+    if (resources.scene.background?.isColor) {
+      resources.scene.background.setHex(atmo.baseSkyHex);
+      if (flash > 0) resources.scene.background.lerp(new THREE.Color(0xcbd9ea), flash * 0.45);
+    }
+  } else {
+    resources.sunlight.intensity = atmo.baseSunIntensity;
+    if (resources.scene.background?.isColor) resources.scene.background.setHex(atmo.baseSkyHex);
+  }
 }
 
 export function setHabitat(resources, habitat, atmosphere = {}) {

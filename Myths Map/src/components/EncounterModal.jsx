@@ -1,17 +1,48 @@
 import { useEffect, useRef } from 'react';
+import { formatAtmosphereSummary } from '../utils/format.js';
 
-export function EncounterModal({ story, highQuality, isDay, onClose, onError }) {
+export function EncounterModal({
+  story,
+  highQuality,
+  weather,
+  marine,
+  moonPhase,
+  onClose,
+  onError,
+}) {
   const dialogRef = useRef(null);
   const stageRef = useRef(null);
   const viewRef = useRef(null);
   const onCloseRef = useRef(onClose);
   const onErrorRef = useRef(onError);
-  const atmosphereRef = useRef({ highQuality, isDay: isDay ?? 1 });
+  const atmosphereRef = useRef({
+    highQuality,
+    isDay: weather?.isDay ?? 1,
+    weatherCode: weather?.weatherCode ?? 0,
+    windSpeed: weather?.windSpeed ?? 10,
+    moonPhase,
+    waveHeight: marine?.waveHeight ?? null,
+  });
+
   onCloseRef.current = onClose;
   onErrorRef.current = onError;
-  atmosphereRef.current = { highQuality, isDay: isDay ?? 1 };
+  atmosphereRef.current = {
+    highQuality,
+    isDay: weather?.isDay ?? 1,
+    weatherCode: weather?.weatherCode ?? 0,
+    windSpeed: weather?.windSpeed ?? 10,
+    moonPhase,
+    waveHeight: marine?.waveHeight ?? null,
+  };
 
   const isOpen = Boolean(story);
+  const atmosphereSummary = isOpen
+    ? formatAtmosphereSummary({
+        weather,
+        marine: story?.type === 'sea' ? marine : null,
+        moonPhase,
+      })
+    : null;
 
   // Lazy-load EncounterView on demand with a fresh <canvas> per open session so
   // forceContextLoss() on close never poisons subsequent 3D creature encounters.
@@ -53,9 +84,8 @@ export function EncounterModal({ story, highQuality, isDay, onClose, onError }) 
           },
         });
         viewRef.current = instance;
-        instance.open(story, atmosphereRef.current.highQuality, {
-          isDay: atmosphereRef.current.isDay,
-        });
+        const { highQuality: hq, ...atmo } = atmosphereRef.current;
+        instance.open(story, hq, atmo);
       } catch (error) {
         if (cancelled) return;
         console.error('Creature encounter could not open', error);
@@ -79,11 +109,26 @@ export function EncounterModal({ story, highQuality, isDay, onClose, onError }) 
     };
   }, [story]);
 
-  // Sync live weather day/night tint and Effects toggle while open.
+  // Sync live weather phenomena, moon phase, wave swell, and Effects toggle while open.
   useEffect(() => {
     if (!isOpen || !viewRef.current) return;
-    viewRef.current.setAtmosphere({ effects: highQuality, isDay: isDay ?? 1 });
-  }, [isOpen, highQuality, isDay]);
+    viewRef.current.setAtmosphere({
+      effects: highQuality,
+      isDay: weather?.isDay ?? 1,
+      weatherCode: weather?.weatherCode ?? 0,
+      windSpeed: weather?.windSpeed ?? 10,
+      moonPhase,
+      waveHeight: marine?.waveHeight ?? null,
+    });
+  }, [
+    isOpen,
+    highQuality,
+    weather?.isDay,
+    weather?.weatherCode,
+    weather?.windSpeed,
+    moonPhase?.name,
+    marine?.waveHeight,
+  ]);
 
   return (
     <dialog
@@ -93,9 +138,15 @@ export function EncounterModal({ story, highQuality, isDay, onClose, onError }) 
       aria-describedby="encounter-help"
     >
       <header className="encounter-heading">
-        <div>
+        <div className="encounter-title-wrap">
           <p className="eyebrow">Creature encounter</p>
           <h2 id="encounter-title">{story?.name || story?.title || ''}</h2>
+          {atmosphereSummary && (
+            <div className="weather-pill encounter-atmosphere-pill" title={atmosphereSummary.tooltip}>
+              <span aria-hidden="true">{atmosphereSummary.icon}</span>
+              <span>{atmosphereSummary.text}</span>
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -110,10 +161,7 @@ export function EncounterModal({ story, highQuality, isDay, onClose, onError }) 
       </header>
       <div className="encounter-stage" ref={stageRef} />
       <footer className="encounter-footer">
-        <span id="encounter-help">
-          Drag to turn · Scroll or pinch to zoom
-          {highQuality && isDay === 0 ? ' · Dusk atmosphere (live local night)' : ''}
-        </span>
+        <span id="encounter-help">Drag to turn · Scroll or pinch to zoom</span>
         <div>
           <button
             id="encounter-out"

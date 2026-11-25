@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { hasEncounterModel } from '../engine/encounter-scene.js';
 import { getStoryCommentCount, listStoryReviews } from '../services/api.js';
-import { fetchLiveWeather, fetchWikipediaLore } from '../services/externalApis.js';
-import { coordinatesLabel, kindLabel } from '../utils/format.js';
+import {
+  fetchLiveWeather,
+  fetchMarineConditions,
+  fetchOpenLibraryBooks,
+  fetchSunriseSunset,
+  fetchWikimediaCommonsMedia,
+  fetchWikipediaLore,
+  getLunarPhase,
+} from '../services/externalApis.js';
+import { coordinatesLabel, formatAtmosphereSummary, kindLabel } from '../utils/format.js';
 import { DiscussionTab } from './DiscussionTab.jsx';
 import { ReviewsTab } from './ReviewsTab.jsx';
 
@@ -20,34 +28,55 @@ export function StoryReader({
   onOpenEncounter,
   onRequireAuth,
   onWeatherChange,
+  onMarineChange,
   onToast,
 }) {
   const [activeTab, setActiveTab] = useState('story');
   const [weather, setWeather] = useState(null);
+  const [marine, setMarine] = useState(null);
+  const [solar, setSolar] = useState(null);
   const [wikiLore, setWikiLore] = useState(null);
   const [wikiOpen, setWikiOpen] = useState(false);
+  const [commonsMedia, setCommonsMedia] = useState([]);
+  const [commonsOpen, setCommonsOpen] = useState(false);
+  const [books, setBooks] = useState([]);
+  const [booksOpen, setBooksOpen] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   const [reviewSummary, setReviewSummary] = useState({ average: 0, count: 0 });
   const [preloadedReviews, setPreloadedReviews] = useState(null);
 
-  // Reset tab and load live weather, Wikipedia context, and badge counts when story changes.
+  // Reset tab and load live weather, marine, solar, Wikipedia, Commons, Open Library, and counts.
   useEffect(() => {
     if (!story) {
       setWeather(null);
+      setMarine(null);
+      setSolar(null);
       setWikiLore(null);
       setWikiOpen(false);
+      setCommonsMedia([]);
+      setCommonsOpen(false);
+      setBooks([]);
+      setBooksOpen(false);
       setPreloadedReviews(null);
       onWeatherChange?.(null);
+      onMarineChange?.(null);
       return undefined;
     }
 
     setActiveTab('story');
     setWeather(null);
+    setMarine(null);
+    setSolar(null);
     setWikiLore(null);
     setWikiOpen(false);
+    setCommonsMedia([]);
+    setCommonsOpen(false);
+    setBooks([]);
+    setBooksOpen(false);
     setCommentCount(0);
     setReviewSummary({ average: 0, count: 0 });
     setPreloadedReviews(null);
+    onMarineChange?.(null);
 
     const controller = new AbortController();
     let active = true;
@@ -58,9 +87,32 @@ export function StoryReader({
       onWeatherChange?.(data);
     });
 
+    if (story.type === 'sea') {
+      fetchMarineConditions(story.lat, story.lng, { signal: controller.signal }).then((data) => {
+        if (!active) return;
+        setMarine(data);
+        onMarineChange?.(data);
+      });
+    }
+
+    fetchSunriseSunset(story.lat, story.lng, { signal: controller.signal }).then((data) => {
+      if (!active) return;
+      setSolar(data);
+    });
+
     fetchWikipediaLore(story, { signal: controller.signal }).then((data) => {
       if (!active) return;
       setWikiLore(data);
+    });
+
+    fetchWikimediaCommonsMedia(story, { signal: controller.signal }).then((items) => {
+      if (!active) return;
+      setCommonsMedia(items);
+    });
+
+    fetchOpenLibraryBooks(story, { signal: controller.signal }).then((items) => {
+      if (!active) return;
+      setBooks(items);
     });
 
     getStoryCommentCount(story.id).then((count) => {
@@ -80,7 +132,7 @@ export function StoryReader({
       active = false;
       controller.abort();
     };
-  }, [story?.id, story?.lat, story?.lng, story?.region]);
+  }, [story?.id, story?.lat, story?.lng, story?.region, story?.type]);
 
   const handleCountDelta = useCallback((delta) => {
     setCommentCount((prev) => Math.max(0, prev + delta));
@@ -95,6 +147,12 @@ export function StoryReader({
   const displayImage = story.banner || story.imageUrl || '';
   const fullImageLink = story.illustration || story.imageUrl || displayImage;
   const showEncounterButton = !story.community && hasEncounterModel(story.id);
+  const moonPhase = solar?.moonPhase || getLunarPhase();
+  const atmosphereSummary = formatAtmosphereSummary({
+    weather,
+    marine: story.type === 'sea' ? marine : null,
+    moonPhase,
+  });
 
   const handleTabKeyDown = (event) => {
     const currentIndex = TABS.indexOf(activeTab);
@@ -128,15 +186,10 @@ export function StoryReader({
         {coordinatesLabel(story)}
       </p>
 
-      {weather && (
-        <div
-          className="weather-pill"
-          title={`Live local weather (${weather.dayPeriod}, wind ${Math.round(weather.windSpeed)} km/h) · Open-Meteo.com`}
-        >
-          <span aria-hidden="true">{weather.icon}</span>
-          <span>
-            {weather.temperature}°C · {weather.label} · {weather.dayPeriod}
-          </span>
+      {atmosphereSummary && (
+        <div className="weather-pill" title={atmosphereSummary.tooltip}>
+          <span aria-hidden="true">{atmosphereSummary.icon}</span>
+          <span>{atmosphereSummary.text}</span>
         </div>
       )}
 
@@ -264,6 +317,87 @@ export function StoryReader({
                   <a href={wikiLore.url} target="_blank" rel="noopener noreferrer">
                     Read more on Wikipedia ↗
                   </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          {commonsMedia.length > 0 && (
+            <div className="wiki-card">
+              <button
+                type="button"
+                className="wiki-toggle"
+                aria-expanded={String(commonsOpen)}
+                onClick={() => setCommonsOpen((open) => !open)}
+              >
+                <span>Archival Gallery ({commonsMedia.length})</span>
+                <span aria-hidden="true">{commonsOpen ? '−' : '+'}</span>
+              </button>
+              {commonsOpen && (
+                <div className="wiki-body">
+                  <div className="commons-grid">
+                    {commonsMedia.map((item) => (
+                      <a
+                        key={item.pageUrl}
+                        className="commons-item"
+                        href={item.pageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <img src={item.thumbUrl} alt={item.title} loading="lazy" />
+                        <span className="commons-title">{item.title}</span>
+                        {(item.artist || item.license) && (
+                          <span className="commons-credit">
+                            {[item.artist, item.license].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {books.length > 0 && (
+            <div className="wiki-card">
+              <button
+                type="button"
+                className="wiki-toggle"
+                aria-expanded={String(booksOpen)}
+                onClick={() => setBooksOpen((open) => !open)}
+              >
+                <span>Further Reading ({books.length})</span>
+                <span aria-hidden="true">{booksOpen ? '−' : '+'}</span>
+              </button>
+              {booksOpen && (
+                <div className="wiki-body">
+                  <ul className="book-list">
+                    {books.map((book) => (
+                      <li key={book.key} className="book-item">
+                        {book.coverUrl && (
+                          <img
+                            className="book-cover"
+                            src={book.coverUrl}
+                            alt=""
+                            loading="lazy"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        )}
+                        <div className="book-info">
+                          <a href={book.url} target="_blank" rel="noopener noreferrer">
+                            {book.title} ↗
+                          </a>
+                          <span>
+                            {book.author}
+                            {book.year ? ` (${book.year})` : ''}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>

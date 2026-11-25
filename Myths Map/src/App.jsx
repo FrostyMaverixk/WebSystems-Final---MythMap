@@ -26,6 +26,7 @@ import {
   subscribeAuth,
   toggleBookmark,
 } from './services/api.js';
+import { getLunarPhase } from './services/externalApis.js';
 import { kindLabel } from './utils/format.js';
 
 function initialHighQuality() {
@@ -69,6 +70,7 @@ export default function App() {
   const [statusOverride, setStatusOverride] = useState('');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(true);
   const [activeWeather, setActiveWeather] = useState(null);
+  const [activeMarine, setActiveMarine] = useState(null);
 
   // Modals & 3D Encounter
   const [encounterStory, setEncounterStory] = useState(null);
@@ -443,6 +445,7 @@ export default function App() {
         placingPin={placingPin}
         canWrite={canWrite}
         windSpeed={activeWeather?.windSpeed ?? null}
+        waveHeight={activeMarine?.waveHeight ?? null}
         encounterOpen={Boolean(encounterStory)}
         statusOverride={statusOverride}
         onToggleQuality={handleToggleQuality}
@@ -525,6 +528,7 @@ export default function App() {
           onOpenEncounter={(story) => setEncounterStory(story)}
           onRequireAuth={handleRequireAuth}
           onWeatherChange={setActiveWeather}
+          onMarineChange={setActiveMarine}
           onToast={showToast}
         />
       </main>
@@ -575,7 +579,9 @@ export default function App() {
       <EncounterModal
         story={encounterStory}
         highQuality={highQuality}
-        isDay={activeWeather?.isDay ?? 1}
+        weather={activeWeather}
+        marine={selectedStory?.type === 'sea' ? activeMarine : null}
+        moonPhase={getLunarPhase()}
         onClose={() => setEncounterStory(null)}
         onError={showToast}
       />

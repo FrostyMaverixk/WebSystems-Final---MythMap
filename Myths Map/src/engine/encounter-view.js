@@ -1,5 +1,12 @@
 import * as THREE from 'three';
-import { createEncounterModel, makeEnvironment, setAtmosphereTint, setHabitat, habitatOf } from './encounter-scene.js';
+import {
+  createEncounterModel,
+  habitatOf,
+  makeEnvironment,
+  setAtmosphereTint,
+  setHabitat,
+  updateEncounterAtmosphere,
+} from './encounter-scene.js';
 
 const clamp = THREE.MathUtils.clamp;
 
@@ -19,7 +26,8 @@ export class EncounterView {
     this.resizeObserver.observe(this.canvas);
     this.onClose = onClose || (() => {});
     this.effects = true;
-    this.isDay = 1;
+    this.atmosphere = { isDay: 1, weatherCode: 0, windSpeed: 10, moonPhase: null, waveHeight: null };
+    this.lastDelta = 0;
 
     const listen = (target, type, fn, options) =>
       target.addEventListener(type, fn, { ...options, signal: this.controls.signal });
@@ -66,12 +74,12 @@ export class EncounterView {
     });
   }
 
-  open(story, effects, { isDay = 1 } = {}) {
+  open(story, effects, atmosphere = {}) {
     this.releaseModel(false);
     this.model = createEncounterModel(story.id);
     this.effects = effects;
-    this.isDay = isDay;
-    setHabitat(this.environment, habitatOf(story), { isDay, effects });
+    this.atmosphere = { ...this.atmosphere, ...atmosphere };
+    setHabitat(this.environment, habitatOf(story), this.atmosphere);
     this.environment.scene.add(this.model.group);
     const bounds = new THREE.Box3().setFromObject(this.model.group);
     bounds.getCenter(this.target);
@@ -80,15 +88,16 @@ export class EncounterView {
     this.elevation = 0.06;
     this.magnification = 1;
     this.elapsed = 0;
+    this.lastDelta = 0;
     if (!this.dialog.open) this.dialog.showModal();
     this.resize();
     this.refreshMotion();
   }
 
-  setAtmosphere({ effects, isDay }) {
+  setAtmosphere({ effects, ...atmosphere } = {}) {
     if (effects !== undefined) this.effects = effects;
-    if (isDay !== undefined) this.isDay = isDay;
-    setAtmosphereTint(this.environment, { effects: this.effects, isDay: this.isDay });
+    this.atmosphere = { ...this.atmosphere, ...atmosphere };
+    setAtmosphereTint(this.environment, this.atmosphere);
     this.refreshMotion();
   }
 
@@ -99,21 +108,21 @@ export class EncounterView {
     const camera = this.environment.camera;
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    this.draw();
+    this.draw(0);
   }
 
   rotate(x, y) {
     this.yaw += x;
     this.elevation = clamp(this.elevation + y, 0.01, 0.85);
-    this.draw();
+    this.draw(0);
   }
 
   zoom(factor) {
     this.magnification = clamp(this.magnification * factor, 0.65, 1.65);
-    this.draw();
+    this.draw(0);
   }
 
-  draw() {
+  draw(delta = 0) {
     if (!this.model || !this.dialog.open) return;
     const { camera, scene } = this.environment;
     const tangent = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
@@ -131,6 +140,7 @@ export class EncounterView {
     );
     camera.lookAt(this.target);
     this.model.animate(this.elapsed);
+    updateEncounterAtmosphere(this.environment, this.elapsed, delta, this.animate);
     this.renderer.render(scene, camera);
   }
 
@@ -141,12 +151,13 @@ export class EncounterView {
     if (this.animate) {
       let previous = performance.now();
       this.renderer.setAnimationLoop((time) => {
-        this.elapsed += clamp((time - previous) / 1000, 0, 0.1);
+        const delta = clamp((time - previous) / 1000, 0, 0.1);
         previous = time;
-        this.draw();
+        this.elapsed += delta;
+        this.draw(delta);
       });
     }
-    this.draw();
+    this.draw(0);
   }
 
   releaseModel(notify = true) {
@@ -179,6 +190,7 @@ export class EncounterView {
     });
     geometries.forEach((g) => g.dispose());
     materials.forEach((m) => m.dispose());
+    for (const tex of this.environment.textures || []) tex.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
   }

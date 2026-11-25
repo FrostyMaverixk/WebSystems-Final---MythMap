@@ -13,7 +13,7 @@ function makeWater() {
   const fallback = new THREE.DataTexture(new Uint8Array([128]), 1, 1, THREE.RedFormat);
   fallback.needsUpdate = true;
   const uniforms = {
-    uTime: { value: 0 }, uWakeWidth: { value: 0 }, uCursorActive: { value: 0 },
+    uTime: { value: 0 }, uWakeWidth: { value: 0 }, uCursorActive: { value: 0 }, uSwell: { value: 1.0 },
     uCursorWorld: { value: new THREE.Vector2() }, uOrigin: { value: new THREE.Vector2(...ORIGIN) },
     uFieldMin: { value: new THREE.Vector2(bounds.minX, bounds.minY) },
     uFieldScale: { value: new THREE.Vector2(1 / (bounds.maxX - bounds.minX), 1 / (bounds.maxY - bounds.minY)) },
@@ -60,6 +60,7 @@ export class World {
     this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
     this.highQuality = config.highQuality ?? !this.reducedMotion.matches;
     this.windMultiplier = 1;
+    this.targetSwell = 1.0;
     this.builtinCreatures = Array.isArray(config.creatures) ? config.creatures : CREATURES;
     this.communityRecords = [];
     this.map = new mapboxgl.Map({
@@ -112,6 +113,16 @@ export class World {
     } else {
       this.windMultiplier = 1;
     }
+  }
+
+  setWaveHeight(waveHeightMeters) {
+    if (typeof waveHeightMeters === 'number' && Number.isFinite(waveHeightMeters) && waveHeightMeters >= 0) {
+      // Modulate ocean ripple intensity subtly from calm (0.85) to strong swell (1.6).
+      this.targetSwell = Math.max(0.85, Math.min(1.6, 0.85 + waveHeightMeters * 0.35));
+    } else {
+      this.targetSwell = 1.0;
+    }
+    this.uniforms.uSwell.value = this.highQuality ? this.targetSwell : 1.0;
   }
 
   async load() {
@@ -430,6 +441,7 @@ export class World {
     this.clearPointer();
     this.trails.length = 0;
     for (const cloud of this.clouds) cloud.visible = on;
+    this.uniforms.uSwell.value = on ? this.targetSwell : 1.0;
     this.lastFrame = nowSeconds();
     this.redrape = true;
     this.syncPitch();

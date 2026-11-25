@@ -11,7 +11,15 @@ import {
   hydrateCreaturesWithGallery,
   useLocalCoastline,
 } from '../src/engine/config.js';
-const { hasEncounterModel, createEncounterModel, habitatOf } = await import('../src/engine/encounter-scene.js');
+const {
+  hasEncounterModel,
+  createEncounterModel,
+  habitatOf,
+  classifyWeatherCode,
+  makeEnvironment,
+  setAtmosphereTint,
+  updateEncounterAtmosphere,
+} = await import('../src/engine/encounter-scene.js');
 import { validateMythImage } from '../src/services/imageUpload.js';
 import {
   isLocalDemoMode,
@@ -37,8 +45,22 @@ import {
   formatFirebaseError,
   summarizeReviews,
 } from '../src/services/api.js';
-import { fetchLiveWeather, fetchWikipediaLore } from '../src/services/externalApis.js';
-import { coordinatesLabel, kindLabel, roleLabel, statusLabel } from '../src/utils/format.js';
+import {
+  fetchLiveWeather,
+  fetchMarineConditions,
+  fetchOpenLibraryBooks,
+  fetchSunriseSunset,
+  fetchWikimediaCommonsMedia,
+  fetchWikipediaLore,
+  getLunarPhase,
+} from '../src/services/externalApis.js';
+import {
+  coordinatesLabel,
+  formatAtmosphereSummary,
+  kindLabel,
+  roleLabel,
+  statusLabel,
+} from '../src/utils/format.js';
 
 const rootDir = fileURLToPath(new URL('../', import.meta.url));
 
@@ -138,7 +160,21 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
   let calls = 0;
   globalThis.fetch = async (url) => {
     calls++;
-    if (String(url).includes('open-meteo.com')) {
+    const urlStr = String(url);
+    if (urlStr.includes('marine-api.open-meteo.com')) {
+      return new Response(
+        JSON.stringify({
+          current: {
+            wave_height: 1.05,
+            wave_direction: 68,
+            wave_period: 8.4,
+            swell_wave_height: 0.92,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (urlStr.includes('api.open-meteo.com')) {
       return new Response(
         JSON.stringify({
           current: {
@@ -152,8 +188,86 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
     }
-    if (String(url).includes('wikipedia.org/api/rest_v1/page/summary/')) {
-      const slug = decodeURIComponent(String(url).split('/summary/')[1] || '');
+    if (urlStr.includes('api.sunrise-sunset.org')) {
+      return new Response(
+        JSON.stringify({
+          status: 'OK',
+          results: {
+            sunrise: '2026-11-24T21:51:10+00:00',
+            sunset: '2026-11-25T09:23:46+00:00',
+            civil_twilight_begin: '2026-11-24T21:28:45+00:00',
+            civil_twilight_end: '2026-11-25T09:46:11+00:00',
+            day_length: 41556,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (urlStr.includes('openlibrary.org/search.json')) {
+      return new Response(
+        JSON.stringify({
+          docs: [
+            {
+              key: '/works/OL2506561W',
+              title: 'Creatures of Philippine lower mythology',
+              author_name: ['Ramos, Maximo D.'],
+              first_publish_year: 1971,
+              cover_i: 13198638,
+            },
+            {
+              key: '/works/OL9999999W',
+              title: 'Creatures of Philippine lower mythology', // duplicate title
+              author_name: ['Maximo Ramos'],
+              first_publish_year: 1990,
+            },
+            {
+              key: '/works/OL123456W',
+              title: 'Unrelated Modern Physics Textbook',
+              author_name: ['Someone Else'],
+              first_publish_year: 2020,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (urlStr.includes('commons.wikimedia.org/w/api.php')) {
+      return new Response(
+        JSON.stringify({
+          query: {
+            pages: {
+              101: {
+                title: 'File:Sarimanok bird of Philippine Folklore.jpg',
+                imageinfo: [
+                  {
+                    mime: 'image/jpeg',
+                    thumburl: 'https://upload.wikimedia.org/sarimanok-thumb.jpg',
+                    descriptionurl: 'https://commons.wikimedia.org/wiki/File:Sarimanok_bird_of_Philippine_Folklore.jpg',
+                    extmetadata: {
+                      Artist: { value: '<a href="https://example.com">Folk Artist</a>' },
+                      LicenseShortName: { value: 'CC BY-SA 4.0' },
+                    },
+                  },
+                ],
+              },
+              102: {
+                title: 'File:Audio.wav',
+                imageinfo: [
+                  {
+                    mime: 'audio/wav',
+                    thumburl: 'https://upload.wikimedia.org/audio.png',
+                    descriptionurl: 'https://commons.wikimedia.org/wiki/File:Audio.wav',
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (urlStr.includes('wikipedia.org/api/rest_v1/page/summary/')) {
+      const slug = decodeURIComponent(urlStr.split('/summary/')[1] || '');
       return new Response(
         JSON.stringify({
           type: 'standard',
@@ -176,6 +290,36 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
     assert.equal(weather2.label, 'Partly cloudy');
     assert.equal(calls, 1);
 
+    const marine1 = await fetchMarineConditions(7.11, 126.61);
+    const marine2 = await fetchMarineConditions(7.12, 126.62); // cached under 7.1,126.6
+    assert.equal(marine1.waveHeight, 1.05);
+    assert.equal(marine1.compass, 'E');
+    assert.equal(marine1.seaState, 'Moderate waves');
+    assert.equal(marine2.swellHeight, 0.92);
+    assert.equal(calls, 2);
+
+    const solar = await fetchSunriseSunset(11.36, 122.36);
+    assert.ok(solar.sunriseLabel.includes('AM'));
+    assert.ok(solar.sunsetLabel.includes('PM'));
+    assert.equal(solar.daylightLabel, '11h 33m');
+    assert.ok(solar.moonPhase.name);
+    assert.equal(getLunarPhase(new Date('2000-01-06T18:14:00Z')).name, 'New Moon');
+
+    const books = await fetchOpenLibraryBooks({ id: 'amdag', community: false });
+    assert.equal(books.length, 1);
+    assert.equal(books[0].title, 'Creatures of Philippine lower mythology');
+    assert.match(books[0].coverUrl, /covers\.openlibrary\.org/);
+
+    const sarimanokMedia = await fetchWikimediaCommonsMedia({ id: 'sarimanok', community: false });
+    assert.equal(sarimanokMedia.length, 1); // audio/wav filtered out
+    assert.equal(sarimanokMedia[0].artist, 'Folk Artist'); // HTML stripped
+    assert.equal(sarimanokMedia[0].license, 'CC BY-SA 4.0');
+
+    const callsBeforeSkipped = calls;
+    const amdagMedia = await fetchWikimediaCommonsMedia({ id: 'amdag', community: false });
+    assert.deepEqual(amdagMedia, []);
+    assert.equal(calls, callsBeforeSkipped);
+
     const lore = await fetchWikipediaLore({ id: 'manananggal', community: false });
     assert.equal(lore.title, 'Manananggal');
     assert.match(lore.url, /wikipedia\.org\/wiki\/Manananggal$/);
@@ -196,7 +340,7 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
     });
     assert.equal(kapreLore.title, 'Kapre');
 
-    const callsBeforeSkipped = calls;
+    const callsBeforeSkippedWiki = calls;
     for (const idWithoutWiki of ['amdag', 'janggu', 'duwende', 'white_deer', 'mumu', 'tarabusaw']) {
       const skipped = await fetchWikipediaLore({ id: idWithoutWiki, community: false });
       assert.equal(skipped, null);
@@ -208,7 +352,7 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
       community: true,
     });
     assert.equal(unknownCommunity, null);
-    assert.equal(calls, callsBeforeSkipped);
+    assert.equal(calls, callsBeforeSkippedWiki);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -367,4 +511,70 @@ test('localDemoStore runs full Guest, Explorer, and Admin workflows without Fire
   assert.equal(remainingAccounts.some((a) => a.uid === explorer.uid), false);
 
   resetLocalDemoData();
+});
+
+test('formatAtmosphereSummary produces one combined message without clock times', () => {
+  const landSummary = formatAtmosphereSummary({
+    weather: { temperature: 24, label: 'Misty fog', dayPeriod: 'Night', icon: '🌫', windSpeed: 8 },
+    marine: null,
+    moonPhase: { name: 'Full Moon', icon: '🌕' },
+  });
+  assert.equal(landSummary.text, '24°C · Misty fog · Night · 🌕 Full Moon');
+  assert.doesNotMatch(landSummary.text, /\b(AM|PM|PHT)\b/);
+
+  const seaSummary = formatAtmosphereSummary({
+    weather: { temperature: 28, label: 'Light drizzle', dayPeriod: 'Day', icon: '🌦', windSpeed: 12 },
+    marine: { waveHeight: 0.86, seaState: 'Gentle swell', compass: 'E' },
+    moonPhase: { name: 'Waxing Crescent', icon: '🌒' },
+  });
+  assert.equal(seaSummary.text, '28°C · Light drizzle · Day · 🌒 Waxing Crescent · 🌊 0.86 m');
+});
+
+test('3D encounter environment renders misty fog, light drizzle, thunderstorm, and moon phase', () => {
+  assert.equal(classifyWeatherCode(0), 'clear');
+  assert.equal(classifyWeatherCode(3), 'overcast');
+  assert.equal(classifyWeatherCode(45), 'mist');
+  assert.equal(classifyWeatherCode(48), 'dense_fog');
+  assert.equal(classifyWeatherCode(51), 'light_drizzle');
+  assert.equal(classifyWeatherCode(63), 'heavy_rain');
+  assert.equal(classifyWeatherCode(95), 'thunderstorm');
+
+  const env = makeEnvironment();
+
+  // Misty fog at Night with Full Moon
+  setAtmosphereTint(env, {
+    isDay: 0,
+    weatherCode: 45,
+    windSpeed: 10,
+    moonPhase: { name: 'Full Moon', icon: '🌕' },
+  });
+  assert.equal(env.mistGroup.visible, true);
+  assert.equal(env.rainLines.visible, false);
+  assert.equal(env.moonGroup.visible, true);
+  assert.equal(env.moonShadow.visible, false);
+  assert.equal(env.scene.fog.near, 7);
+  assert.equal(env.scene.fog.far, 36);
+  updateEncounterAtmosphere(env, 1.0, 0.016, true);
+
+  // Light drizzle during Day
+  setAtmosphereTint(env, {
+    isDay: 1,
+    weatherCode: 51,
+    windSpeed: 14,
+    moonPhase: { name: 'First Quarter', icon: '🌓' },
+  });
+  assert.equal(env.rainLines.visible, true);
+  assert.equal(env.rainLines.geometry.drawRange.count, 95 * 2);
+  assert.equal(env.moonGroup.visible, false);
+  assert.equal(env.cloudGroup.visible, true);
+  updateEncounterAtmosphere(env, 2.0, 0.016, true);
+
+  // Thunderstorm
+  setAtmosphereTint(env, { isDay: 0, weatherCode: 95, windSpeed: 28, moonPhase: { name: 'New Moon', icon: '🌑' } });
+  assert.equal(env.rainLines.visible, true);
+  assert.equal(env.rainLines.geometry.drawRange.count, 320 * 2);
+  assert.equal(env.moonShadow.visible, true);
+  updateEncounterAtmosphere(env, 5.42, 0.016, true);
+
+  for (const tex of env.textures) tex.dispose();
 });
