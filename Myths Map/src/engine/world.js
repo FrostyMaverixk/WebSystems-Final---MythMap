@@ -141,7 +141,7 @@ export class World {
         if (error) reject(error);
         else resolve();
       };
-      const timeout = setTimeout(() => finish(new Error('Mapbox did not finish loading. Check the token, style URL and connection.')), 25000);
+      const timeout = setTimeout(() => finish(new Error('The interactive map took too long to load. Please check your connection and try reloading.')), 25000);
       this.cancelLoad = () => finish(new Error('Map closed.'));
       this.onError = (event) => {
         if (this.disposed) return;
@@ -153,12 +153,12 @@ export class World {
         }
         if (event.sourceId) {
           this.report(event.sourceId === 'ph-coastline'
-            ? 'The local coastline could not load. Check public/assets/ph-coastline.json.'
-            : 'Some hosted map details could not load. Check the connection or tileset access.');
+            ? 'Part of the map coastline could not load. Try reloading the page.'
+            : 'Some map details could not load right now. Please check your connection.');
           return;
         }
         if (status === 401 || status === 403 || (!event.sourceId && !this.map.isStyleLoaded() && initial)) {
-          const message = 'Mapbox could not load the configured map. Check the public token, allowed URLs and style access.';
+          const message = 'The interactive map could not be loaded right now. Please try reloading the page.';
           if (initial) finish(new Error(message));
           else this.report(message);
         }

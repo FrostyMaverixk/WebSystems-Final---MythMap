@@ -11,6 +11,7 @@ export function AuthModal({
   onSignIn,
   onRegister,
   onGuest,
+  onResendVerification,
   onClose,
 }) {
   const [mode, setMode] = useState('signin'); // 'signin' | 'register'
@@ -20,10 +21,14 @@ export function AuthModal({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [needsVerification, setNeedsVerification] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setError('');
+      setNotice('');
+      setNeedsVerification(false);
       setPassword('');
     }
   }, [isOpen, initialMessage]);
@@ -34,15 +39,49 @@ export function AuthModal({
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
+    setNotice('');
+    setNeedsVerification(false);
     try {
       if (mode === 'register') {
-        await onRegister({ name: name.trim(), email: email.trim(), password });
+        const result = await onRegister({ name: name.trim(), email: email.trim(), password });
+        if (result?.verificationRequired) {
+          setMode('signin');
+          setRole('user');
+          setName('');
+          setPassword('');
+          setNotice(
+            `Verification email sent to ${result.email}. Click the link in your inbox (check Spam too), then sign in below.`
+          );
+          return;
+        }
       } else {
         await onSignIn({ email: email.trim(), password, expectedRole: role });
       }
       setPassword('');
     } catch (err) {
-      setError(err?.message || 'Authentication failed.');
+      setError(err?.message || 'Could not sign you in. Please try again.');
+      if (err?.code === 'auth/email-not-verified') {
+        setNeedsVerification(true);
+      }
+    }
+  };
+
+  const handleResendClick = async () => {
+    setError('');
+    setNotice('');
+    try {
+      const result = await onResendVerification?.({ email: email.trim(), password });
+      if (result?.alreadyVerified) {
+        setNeedsVerification(false);
+        setNotice('Your email is already verified! Click Sign in & explore to continue.');
+      } else if (result?.sent) {
+        setNeedsVerification(false);
+        setNotice(
+          `A new verification email was sent to ${result.email}. Check your inbox and spam folder, then sign in.`
+        );
+      }
+    } catch (err) {
+      setError(err?.message || 'Could not resend verification email.');
     }
   };
 
@@ -123,8 +162,8 @@ export function AuthModal({
 
           {!firebaseReady && (
             <p className="form-error" role="status">
-              Firebase is not configured yet. Add your <code>VITE_FIREBASE_*</code> keys to{' '}
-              <code>.env</code> to enable sign-in and guest access.
+              Sign-in is temporarily unavailable right now. You can still explore the map and
+              built-in stories.
             </p>
           )}
 
@@ -135,6 +174,8 @@ export function AuthModal({
               onClick={() => {
                 setMode('signin');
                 setError('');
+                setNotice('');
+                setNeedsVerification(false);
               }}
             >
               Sign In
@@ -145,6 +186,8 @@ export function AuthModal({
               onClick={() => {
                 setMode('register');
                 setError('');
+                setNotice('');
+                setNeedsVerification(false);
               }}
             >
               Create Account
@@ -221,10 +264,28 @@ export function AuthModal({
               </button>
             </div>
 
+            {notice && (
+              <p id="login-notice" className="form-notice" role="status">
+                {notice}
+              </p>
+            )}
+
             {error && (
               <p id="login-error" className="form-error" role="alert">
                 {error}
               </p>
+            )}
+
+            {needsVerification && (
+              <button
+                id="resend-verification"
+                type="button"
+                className="full-button resend-verification-btn"
+                disabled={busy || !firebaseReady}
+                onClick={handleResendClick}
+              >
+                {busy ? 'Sending…' : 'Resend verification email'}
+              </button>
             )}
 
             <button

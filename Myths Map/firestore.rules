@@ -14,7 +14,9 @@ service cloud.firestore {
     }
 
     function isRegisteredUser() {
-      return isSignedIn() && !isAnonymous();
+      return isSignedIn()
+        && !isAnonymous()
+        && request.auth.token.email_verified == true;
     }
 
     function isAdmin() {

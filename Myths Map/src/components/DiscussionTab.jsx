@@ -286,8 +286,7 @@ export function DiscussionTab({
     return (
       <div className="reader-tab-section">
         <p className="empty-state">
-          Community discussions require Cloud Firestore. Add your Firebase Spark project keys in{' '}
-          <code>.env</code> to enable live threads.
+          Community discussions are temporarily unavailable right now. Please check back later.
         </p>
       </div>
     );

@@ -92,7 +92,7 @@ export function EncounterModal({
         instance?.dispose();
         stageRef.current?.replaceChildren();
         viewRef.current = null;
-        onErrorRef.current?.('The 3D view needs WebGL. The illustrated story is still available.');
+        onErrorRef.current?.('3D view isn’t supported on this browser or device. You can still read the illustrated story.');
         onCloseRef.current?.();
       }
     }

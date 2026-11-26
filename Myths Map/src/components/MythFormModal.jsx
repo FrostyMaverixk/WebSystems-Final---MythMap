@@ -309,9 +309,8 @@ export function MythFormModal({
               </>
             ) : (
               <p className="upload-setup-note">
-                Image uploads are currently disabled (configure{' '}
-                <code>VITE_CLOUDINARY_CLOUD_NAME</code> and{' '}
-                <code>VITE_CLOUDINARY_UPLOAD_PRESET</code> in <code>.env</code> to enable).
+                Image uploads are currently unavailable. You can still share your myth without an
+                image.
               </p>
             )}
 

@@ -15,6 +15,7 @@ import {
   firebaseReady,
   listApprovedMyths,
   registerExplorer,
+  resendVerificationEmail,
   resubmitMyth,
   signInAsGuest,
   signInWithEmail,
@@ -304,13 +305,39 @@ export default function App() {
     authBusyRef.current = true;
     setAuthBusy(true);
     try {
-      const profile = await registerExplorer(payload);
+      const result = await registerExplorer(payload);
+      if (result?.verificationRequired) {
+        showToast(
+          `Verification email sent to ${result.email}. Check your inbox (and spam) before signing in.`
+        );
+        return result;
+      }
       guestAutoAttemptedRef.current = false;
-      setUser(profile);
+      setUser(result);
       setAuthModalOpen(false);
       setAuthPromptMessage('');
-      showToast(`Welcome, ${profile.name}. Your Explorer account is ready.`);
+      showToast(`Welcome, ${result.name}. Your Explorer account is ready.`);
       refreshCommunityMyths();
+      return result;
+    } finally {
+      authBusyRef.current = false;
+      setAuthBusy(false);
+    }
+  };
+
+  const handleResendVerification = async (payload) => {
+    authBusyRef.current = true;
+    setAuthBusy(true);
+    try {
+      const result = await resendVerificationEmail(payload);
+      if (result?.alreadyVerified) {
+        showToast('Your email is already verified. Sign in to continue.');
+      } else {
+        showToast(
+          `Verification email resent to ${result.email}. Check your inbox and spam folder.`
+        );
+      }
+      return result;
     } finally {
       authBusyRef.current = false;
       setAuthBusy(false);
@@ -556,6 +583,7 @@ export default function App() {
         onSignIn={handleSignIn}
         onRegister={handleRegister}
         onGuest={handleGuest}
+        onResendVerification={handleResendVerification}
         onClose={handleCloseAuthModal}
       />
 

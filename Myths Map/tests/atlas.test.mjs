@@ -26,6 +26,7 @@ import {
   signInAsGuest,
   signInWithEmail,
   registerExplorer,
+  resendVerificationEmail,
   listApprovedMyths,
   submitMyth,
   listStoryComments,
@@ -142,7 +143,23 @@ test('format helpers and Firebase error formatter produce expected labels', () =
   assert.equal(roleLabel('user'), 'Explorer');
   assert.equal(roleLabel('guest'), 'Guest');
   assert.equal(statusLabel('needs_revision'), 'Needs revision');
-  assert.match(formatFirebaseError({ code: 'permission-denied' }), /Firestore security rules/i);
+  const genericPerm = formatFirebaseError({ code: 'permission-denied' });
+  assert.match(genericPerm, /don’t have permission/i);
+  assert.doesNotMatch(genericPerm, /Firestore|security rules|payload/i);
+  assert.equal(
+    formatFirebaseError({ code: 'permission-denied' }, 'Fallback', {
+      permission: 'Only Administrators can perform this action.',
+    }),
+    'Only Administrators can perform this action.'
+  );
+  assert.equal(
+    formatFirebaseError(
+      { code: 'auth/unknown-code', message: 'Firebase: Error (auth/unknown-code).' },
+      'Could not sign in.'
+    ),
+    'Could not sign in.'
+  );
+  assert.match(formatFirebaseError({ code: 'auth/email-not-verified' }), /verify your email/i);
 });
 
 test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with fallback', async () => {
@@ -359,6 +376,9 @@ test('distance field and Firebase config files are valid', async () => {
   const fbJson = JSON.parse(await fs.readFile(path.join(rootDir, 'firebase.json'), 'utf8'));
   assert.equal(fbJson.hosting.public, 'dist');
   assert.deepEqual(fbJson.hosting.predeploy, ['npm run build']);
+
+  const rules = await fs.readFile(path.join(rootDir, 'firestore.rules'), 'utf8');
+  assert.match(rules, /request\.auth\.token\.email_verified == true/);
 });
 
 test('unconfigured Firebase rejects writes and has no demo backdoor fallback', async () => {
@@ -378,14 +398,18 @@ test('unconfigured Firebase rejects writes and has no demo backdoor fallback', a
     count: 0,
   });
 
-  await assert.rejects(() => signInAsGuest(), /Firebase is not configured yet/i);
+  await assert.rejects(() => signInAsGuest(), /temporarily unavailable/i);
   await assert.rejects(
     () => signInWithEmail({ email: 'admin@example.com', password: 'password123' }),
-    /Firebase is not configured yet/i
+    /temporarily unavailable/i
   );
   await assert.rejects(
     () => registerExplorer({ name: 'Lakan Test', email: 'lakan@example.com', password: 'password123' }),
-    /Firebase is not configured yet/i
+    /temporarily unavailable/i
+  );
+  await assert.rejects(
+    () => resendVerificationEmail({ email: 'lakan@example.com', password: 'password123' }),
+    /temporarily unavailable/i
   );
   await assert.rejects(
     () =>
@@ -400,7 +424,7 @@ test('unconfigured Firebase rejects writes and has no demo backdoor fallback', a
           type: 'land',
         }
       ),
-    /Firebase is not configured yet/i
+    /temporarily unavailable/i
   );
   await assert.rejects(
     () =>
@@ -410,7 +434,7 @@ test('unconfigured Firebase rejects writes and has no demo backdoor fallback', a
         authorName: 'Night Traveler',
         body: 'Heard this story in Antique!',
       }),
-    /Firebase is not configured yet/i
+    /temporarily unavailable/i
   );
   await assert.rejects(
     () =>
@@ -421,7 +445,7 @@ test('unconfigured Firebase rejects writes and has no demo backdoor fallback', a
         category: 'appreciation',
         feedback: 'Known across Southern Tagalog forested trails.',
       }),
-    /Firebase is not configured yet/i
+    /temporarily unavailable/i
   );
 });
 

@@ -184,8 +184,7 @@ export function ReviewsTab({
     return (
       <div className="reader-tab-section">
         <p className="empty-state">
-          Myth reviews require Cloud Firestore. Add your Firebase Spark project keys in{' '}
-          <code>.env</code> to enable ratings and feedback.
+          Story reviews are temporarily unavailable right now. Please check back later.
         </p>
       </div>
     );

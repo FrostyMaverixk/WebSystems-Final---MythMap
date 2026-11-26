@@ -14,13 +14,13 @@ function loadMapbox() {
         if (globalThis.mapboxgl) resolve();
         else {
           mapboxLoaderPromise = null;
-          reject(new Error('Mapbox GL JS could not initialize.'));
+          reject(new Error('The interactive map could not start.'));
         }
       };
       script.onerror = () => {
         script.remove();
         mapboxLoaderPromise = null;
-        reject(new Error('Mapbox GL JS could not load.'));
+        reject(new Error('The interactive map could not load. Please check your connection and try reloading.'));
       };
       document.head.append(script);
     });
@@ -155,7 +155,7 @@ export const MapCanvas = forwardRef(function MapCanvas(
 
       try {
         if (!MAPBOX_TOKEN) {
-          throw new Error('Set VITE_MAPBOX_TOKEN in .env to load the interactive Mapbox atlas.');
+          throw new Error('The interactive map is temporarily unavailable.');
         }
 
         const [, { World }, { setupInteraction }] = await Promise.all([
@@ -168,7 +168,7 @@ export const MapCanvas = forwardRef(function MapCanvas(
         let styleConfig = MAPBOX_STYLE;
         if (!styleConfig) {
           const response = await fetch(STYLE_URL);
-          if (!response.ok) throw new Error('The bundled atlas style could not be loaded.');
+          if (!response.ok) throw new Error('The map appearance could not be loaded. Please try reloading.');
           styleConfig = useLocalCoastline(await response.json(), window.location.origin);
         }
         if (!active) return;

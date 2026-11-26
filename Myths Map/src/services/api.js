@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  sendEmailVerification,
   signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
@@ -42,9 +43,7 @@ const VALID_MYTH_STATUSES = new Set(['pending', 'approved', 'needs_revision', 'r
 
 function ensureFirebase() {
   if (!firebaseReady || !auth || !db) {
-    throw new Error(
-      'Firebase is not configured yet. Add your VITE_FIREBASE_* keys to .env (see .env.example) or enable the Firebase Emulator Suite.'
-    );
+    throw new Error('This feature is temporarily unavailable right now. Please try again later.');
   }
 }
 
@@ -64,31 +63,81 @@ function sortByCreatedAsc(items) {
   return [...items].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
 }
 
-export function formatFirebaseError(error, fallback = 'The request could not be completed.') {
+function isTechnicalErrorMessage(msg) {
+  return /firebase|firestore|\(auth\/|permission|insufficient|requires an index|console\.firebase|googleapis|quota|grpc|deadline|payload/i.test(
+    msg
+  );
+}
+
+export function formatFirebaseError(
+  error,
+  fallback = 'Something went wrong. Please try again.',
+  { permission } = {}
+) {
   const code = error?.code || '';
   switch (code) {
     case 'auth/invalid-credential':
+    case 'auth/invalid-login-credentials':
     case 'auth/wrong-password':
     case 'auth/user-not-found':
-      return 'Incorrect email or password. Please check your credentials and try again.';
+      return 'Incorrect email or password. Please check your details and try again.';
     case 'auth/email-already-in-use':
       return 'An account with this email already exists. Try signing in instead.';
     case 'auth/invalid-email':
       return 'Please enter a valid email address.';
     case 'auth/weak-password':
-      return 'Password must be at least 6 characters long.';
+      return 'Please choose a stronger password (at least 6 characters).';
+    case 'auth/missing-password':
+      return 'Please enter your password.';
+    case 'auth/user-disabled':
+      return 'This account has been disabled. Please contact an administrator for help.';
+    case 'auth/requires-recent-login':
+      return 'For your security, please sign out and sign in again before trying this.';
     case 'auth/operation-not-allowed':
-      return 'This sign-in method is not enabled in your Firebase Authentication console yet.';
+      return 'This sign-in option is currently unavailable. Please try again later.';
     case 'auth/too-many-requests':
-      return 'Too many attempts. Please wait a moment and try again.';
+      return 'Too many attempts in a short time. Please wait a minute and try again.';
+    case 'auth/email-not-verified':
+      return 'Please verify your email address before signing in. Check your inbox (and spam folder) for the verification link.';
     case 'auth/network-request-failed':
-      return 'Network error while contacting Firebase. Check your connection and try again.';
+      return 'Could not connect right now. Please check your internet connection and try again.';
+    case 'auth/internal-error':
+    case 'auth/invalid-api-key':
+    case 'auth/app-not-authorized':
+      return 'Sign-in is temporarily unavailable. Please try again later.';
     case 'permission-denied':
-      return 'Permission denied by Firestore security rules for this account or payload.';
+    case 'firestore/permission-denied':
+      return (
+        permission ||
+        'You don’t have permission to do that. Make sure you’re signed in with a verified account and all fields are filled out properly.'
+      );
+    case 'unauthenticated':
+    case 'firestore/unauthenticated':
+      return 'Your session has expired. Please sign in again to continue.';
+    case 'not-found':
+    case 'firestore/not-found':
+      return 'That item could no longer be found. It may have been removed.';
+    case 'already-exists':
+    case 'firestore/already-exists':
+      return 'This entry already exists.';
+    case 'resource-exhausted':
+    case 'firestore/resource-exhausted':
+      return 'The site is busy right now. Please wait a moment and try again.';
+    case 'deadline-exceeded':
     case 'unavailable':
-      return 'Cloud Firestore is temporarily unavailable. Please try again.';
-    default:
-      return error?.message || fallback;
+    case 'firestore/unavailable':
+      return 'The service is temporarily unavailable. Please check your internet connection and try again.';
+    case 'failed-precondition':
+    case 'firestore/failed-precondition':
+      return 'This section is still getting ready. Please try again in a moment.';
+    case 'aborted':
+    case 'cancelled':
+      return 'The request was interrupted. Please try again.';
+    default: {
+      const raw = typeof error?.message === 'string' ? error.message.trim() : '';
+      if (!raw || isTechnicalErrorMessage(raw)) return fallback;
+      return raw;
+    }
   }
 }
 
@@ -96,7 +145,7 @@ function validateImageUrl(url) {
   const clean = typeof url === 'string' ? url.trim() : '';
   if (!clean) return '';
   if (!clean.startsWith('https://') || clean.length > 500) {
-    throw new Error('Image URL must be an https:// URL of at most 500 characters.');
+    throw new Error('The attached image link looks invalid. Please upload your image again.');
   }
   return clean;
 }
@@ -258,6 +307,10 @@ export function subscribeAuth(callback) {
       });
       return;
     }
+    if (!firebaseUser.emailVerified) {
+      callback(null);
+      return;
+    }
     try {
       const profile = await loadOrInitUserProfile(firebaseUser);
       callback(profile);
@@ -317,6 +370,14 @@ export async function signInWithEmail({ email, password, expectedRole }) {
   }
   try {
     const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    if (!credential.user.emailVerified) {
+      await signOut(auth);
+      const err = new Error(
+        'Please verify your email address before signing in. Check your inbox (and spam folder) for the verification link.'
+      );
+      err.code = 'auth/email-not-verified';
+      throw err;
+    }
     const profile = await loadOrInitUserProfile(credential.user);
     if (expectedRole === 'admin' && profile.role !== 'admin') {
       await signOut(auth);
@@ -324,7 +385,12 @@ export async function signInWithEmail({ email, password, expectedRole }) {
     }
     return profile;
   } catch (error) {
-    if (error?.message === 'This account does not have Administrator privileges.') throw error;
+    if (
+      error?.code === 'auth/email-not-verified' ||
+      error?.message === 'This account does not have Administrator privileges.'
+    ) {
+      throw error;
+    }
     throw new Error(formatFirebaseError(error, 'Sign in failed.'));
   }
 }
@@ -344,25 +410,41 @@ export async function registerExplorer({ name, email, password }) {
   }
   try {
     const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-    await updateProfile(credential.user, { displayName: cleanName });
-    await setDoc(doc(db, 'users', credential.user.uid), {
-      name: cleanName,
-      email: cleanEmail,
-      role: 'user',
-      bookmarks: [],
-      createdAt: serverTimestamp(),
-      lastActiveAt: serverTimestamp(),
-    });
+    try {
+      await updateProfile(credential.user, { displayName: cleanName });
+      await sendEmailVerification(credential.user);
+    } finally {
+      await signOut(auth).catch(() => {});
+    }
     return {
-      uid: credential.user.uid,
-      role: 'user',
-      name: cleanName,
+      verificationRequired: true,
       email: cleanEmail,
-      isAnonymous: false,
-      bookmarks: [],
+      name: cleanName,
     };
   } catch (error) {
     throw new Error(formatFirebaseError(error, 'Could not create your account.'));
+  }
+}
+
+export async function resendVerificationEmail({ email, password }) {
+  ensureFirebase();
+  const cleanEmail = String(email || '').trim();
+  if (!cleanEmail || !password) {
+    throw new Error('Enter your email and password above to resend the verification email.');
+  }
+  try {
+    const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    try {
+      if (credential.user.emailVerified) {
+        return { alreadyVerified: true, email: cleanEmail };
+      }
+      await sendEmailVerification(credential.user);
+      return { sent: true, email: cleanEmail };
+    } finally {
+      await signOut(auth).catch(() => {});
+    }
+  } catch (error) {
+    throw new Error(formatFirebaseError(error, 'Could not resend verification email.'));
   }
 }
 
@@ -377,7 +459,7 @@ export async function signOutUser() {
 export async function toggleBookmark(uid, storyId, currentBookmarks = []) {
   ensureFirebase();
   if (!uid || !storyId || !/^[a-zA-Z0-9_-]{1,100}$/.test(storyId)) {
-    throw new Error('Invalid story ID.');
+    throw new Error('Could not save that story. Please refresh the page and try again.');
   }
   const set = new Set(currentBookmarks);
   const saved = !set.has(storyId);
@@ -397,7 +479,11 @@ export async function toggleBookmark(uid, storyId, currentBookmarks = []) {
     });
     return { bookmarks: next, saved };
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not update your saved collection.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not update your saved collection.', {
+        permission: 'Please sign in with a verified account to save stories.',
+      })
+    );
   }
 }
 
@@ -434,7 +520,11 @@ export async function listMySubmissions(uid) {
       const snap = await getDocs(query(col, where('ownerId', '==', uid)));
       return sortByCreatedDesc(snap.docs.map(serializeMyth));
     }
-    throw new Error(formatFirebaseError(error, 'Could not load your submissions.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not load your submissions.', {
+        permission: 'Please sign in with a verified account to view your submissions.',
+      })
+    );
   }
 }
 
@@ -456,7 +546,12 @@ export async function submitMyth(user, data) {
     });
     return { id: ref.id, ...payload, ownerId: user.uid, status: 'pending' };
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not submit your myth.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not submit your myth.', {
+        permission:
+          'Please sign in with a verified account to share a story, and check that all required fields are filled out.',
+      })
+    );
   }
 }
 
@@ -474,7 +569,11 @@ export async function resubmitMyth(mythId, user, data) {
     });
     return { id: mythId, ...payload, status: 'pending' };
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not resubmit your story.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not resubmit your story.', {
+        permission: 'Only the original author can edit and resubmit this story after revisions are requested.',
+      })
+    );
   }
 }
 
@@ -491,14 +590,18 @@ export async function listAllMythsForAdmin() {
       const snap = await getDocs(collection(db, 'myths'));
       return sortByCreatedDesc(snap.docs.map(serializeMyth));
     }
-    throw new Error(formatFirebaseError(error, 'Could not load submissions.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not load submissions.', {
+        permission: 'Only Administrators can perform this action.',
+      })
+    );
   }
 }
 
 export async function reviewMyth({ mythId, status, reviewNote = '', adminUser }) {
   ensureFirebase();
   if (!VALID_MYTH_STATUSES.has(status)) {
-    throw new Error('Invalid moderation status.');
+    throw new Error('Please choose Approve, Request revision, or Reject.');
   }
   const cleanNote = String(reviewNote || '').trim();
   if (cleanNote.length > 500) {
@@ -522,7 +625,11 @@ export async function reviewMyth({ mythId, status, reviewNote = '', adminUser })
     });
     return historyEntry;
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not save moderation decision.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not save moderation decision.', {
+        permission: 'Only Administrators can perform this action.',
+      })
+    );
   }
 }
 
@@ -531,7 +638,11 @@ export async function deleteMyth(mythId) {
   try {
     await deleteDoc(doc(db, 'myths', mythId));
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not delete submission.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not delete submission.', {
+        permission: 'Only Administrators can perform this action.',
+      })
+    );
   }
 }
 
@@ -558,7 +669,11 @@ export async function listAccountsForAdmin(myths = []) {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not load account directory.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not load account directory.', {
+        permission: 'Only Administrators can perform this action.',
+      })
+    );
   }
 }
 
@@ -570,7 +685,11 @@ export async function deleteAccountProfile(uid, currentAdminUid) {
   try {
     await deleteDoc(doc(db, 'users', uid));
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not remove account profile.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not remove account profile.', {
+        permission: 'Only Administrators can perform this action.',
+      })
+    );
   }
 }
 
@@ -710,7 +829,11 @@ export async function createComment({ storyId, parentId = null, user, authorName
       updatedAt: now,
     };
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not post your comment.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not post your comment.', {
+        permission: 'Please refresh the page or sign in to post a comment.',
+      })
+    );
   }
 }
 
@@ -726,7 +849,11 @@ export async function updateComment({ storyId, commentId, body }) {
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not update your comment.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not update your comment.', {
+        permission: 'You can only edit or delete your own comments.',
+      })
+    );
   }
 }
 
@@ -738,7 +865,11 @@ export async function togglePinComment({ storyId, commentId, pinned }) {
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not update pin state.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not update pin state.', {
+        permission: 'Only Administrators can pin or unpin comments.',
+      })
+    );
   }
 }
 
@@ -760,7 +891,11 @@ export async function deleteComment({ storyId, commentId, isTopLevel = false, is
       await deleteDoc(doc(commentsCol, commentId));
     }
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not delete comment.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not delete comment.', {
+        permission: 'You can only edit or delete your own comments.',
+      })
+    );
   }
 }
 
@@ -860,7 +995,11 @@ export async function saveReview({ storyId, user, rating, category, feedback, ex
       updatedAt: now,
     };
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not save your review.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not save your review.', {
+        permission: 'Please sign in with a verified account to leave a review.',
+      })
+    );
   }
 }
 
@@ -869,7 +1008,11 @@ export async function deleteReview({ storyId, reviewUid }) {
   try {
     await deleteDoc(doc(db, 'stories', storyId, 'reviews', reviewUid));
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not delete review.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not delete review.', {
+        permission: 'You can only delete your own review.',
+      })
+    );
   }
 }
 
@@ -881,6 +1024,10 @@ export async function toggleHighlightReview({ storyId, reviewUid, highlighted })
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not update highlight status.'));
+    throw new Error(
+      formatFirebaseError(error, 'Could not update highlight status.', {
+        permission: 'Only Administrators can highlight reviews.',
+      })
+    );
   }
 }

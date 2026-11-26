@@ -19,7 +19,7 @@ export function validateMythImage(file) {
   if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
     return {
       valid: false,
-      error: 'Only PNG, JPEG, and WebP images are allowed (SVG and other file types are blocked).',
+      error: 'Please choose a PNG, JPG, or WebP image file.',
     };
   }
   if (file.size > MAX_IMAGE_BYTES) {
@@ -43,7 +43,7 @@ export function uploadMythImage(file, { onProgress, signal } = {}) {
   }
   if (!isCloudinaryConfigured) {
     return Promise.reject(
-      new Error('Image uploads are not configured. Set VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET.')
+      new Error('Image uploads are currently unavailable. You can still submit your story without an image.')
     );
   }
 
@@ -96,18 +96,29 @@ export function uploadMythImage(file, { onProgress, signal } = {}) {
       try {
         data = JSON.parse(xhr.responseText || '{}');
       } catch {
-        reject(new Error('Unexpected response from image upload service.'));
+        reject(new Error('Could not upload your image right now. Please try again.'));
         return;
       }
 
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error(data?.error?.message || `Image upload failed (${xhr.status}).`));
+        const rawMsg = String(data?.error?.message || '').toLowerCase();
+        if (rawMsg.includes('file size') || rawMsg.includes('too large')) {
+          reject(new Error('That image is too large to upload. Please choose an image under 5 MB.'));
+        } else if (
+          rawMsg.includes('invalid image') ||
+          rawMsg.includes('format') ||
+          rawMsg.includes('unsupported')
+        ) {
+          reject(new Error('That file could not be read as an image. Please try a PNG, JPG, or WebP photo.'));
+        } else {
+          reject(new Error('Could not upload your image right now. Please try again or submit without an image.'));
+        }
         return;
       }
 
       const secureUrl = typeof data?.secure_url === 'string' ? data.secure_url.trim() : '';
       if (!secureUrl.startsWith('https://') || secureUrl.length > 500) {
-        reject(new Error('Image service returned an invalid URL.'));
+        reject(new Error('Could not finish uploading your image. Please try again.'));
         return;
       }
 
