@@ -7,7 +7,7 @@ import {
   summarizeReviews,
   toggleHighlightReview,
 } from '../services/api.js';
-import { isBackendReady } from '../services/firebase.js';
+import { firebaseReady } from '../services/firebase.js';
 import { dateLabel, roleLabel } from '../utils/format.js';
 
 const MAX_FEEDBACK_LENGTH = 1000;
@@ -46,7 +46,7 @@ export function ReviewsTab({
   const isAdmin = user?.role === 'admin';
 
   const loadReviews = useCallback(async () => {
-    if (!storyId || !isBackendReady) {
+    if (!storyId || !firebaseReady) {
       setReviews([]);
       onSummaryChange?.({ average: 0, count: 0 });
       return;
@@ -180,7 +180,7 @@ export function ReviewsTab({
     }
   };
 
-  if (!isBackendReady) {
+  if (!firebaseReady) {
     return (
       <div className="reader-tab-section">
         <p className="empty-state">
@@ -224,7 +224,11 @@ export function ReviewsTab({
           <button
             type="button"
             className="accent-button"
-            onClick={() => onRequireAuth?.('Sign in as an Explorer or Administrator to submit a review.')}
+            onClick={() =>
+              onRequireAuth?.(
+                'Sign in or create an Explorer account to rate stories and submit a review.'
+              )
+            }
           >
             Sign in to review
           </button>

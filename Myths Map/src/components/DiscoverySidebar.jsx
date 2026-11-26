@@ -83,14 +83,13 @@ export function DiscoverySidebar({
               title={
                 canWrite
                   ? 'Show the stories you saved'
-                  : 'Sign in to save stories to your collection'
+                  : 'Sign in to filter your saved stories'
               }
             >
               <input
                 id="saved-filter"
                 type="checkbox"
                 checked={canWrite && savedOnly}
-                disabled={!canWrite}
                 onChange={(event) => onSavedOnlyChange(event.target.checked)}
               />
               <span>Saved</span>

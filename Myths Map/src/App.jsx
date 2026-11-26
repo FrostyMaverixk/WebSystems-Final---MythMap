@@ -12,12 +12,9 @@ import { SubmissionsModal } from './components/SubmissionsModal.jsx';
 import { Toast } from './components/Toast.jsx';
 import { CREATURES, GALLERY_URL, hydrateCreaturesWithGallery } from './engine/config.js';
 import {
-  isBackendReady,
-  isLocalDemoMode,
+  firebaseReady,
   listApprovedMyths,
-  quickSignInDemoRole,
   registerExplorer,
-  resetLocalDemoData,
   resubmitMyth,
   signInAsGuest,
   signInWithEmail,
@@ -43,14 +40,15 @@ function initialHighQuality() {
 export default function App() {
   const mapRef = useRef(null);
   const toastTimerRef = useRef(null);
+  const authBusyRef = useRef(false);
+  const guestAutoAttemptedRef = useRef(false);
 
   // Built-in gallery manifest (dynamically baked via scripts/bake-gallery.mjs)
   const [gallery, setGallery] = useState(null);
 
   // Auth & session
-  const [authInitialized, setAuthInitialized] = useState(!isBackendReady);
   const [user, setUser] = useState(null);
-  const [authModalOpen, setAuthModalOpen] = useState(true);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authPromptMessage, setAuthPromptMessage] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
 
@@ -110,18 +108,23 @@ export default function App() {
   );
   const communityMarker = gallery?.communityMarker || '';
 
-  // 2. Subscribe to Auth state (Firebase Auth or Local Demo Store)
+  // 2. Subscribe to Auth state (Firebase Auth) and auto-enter Guest mode when unauthenticated
   useEffect(() => {
-    if (!isBackendReady) {
-      setAuthInitialized(true);
+    if (!firebaseReady) {
       return undefined;
     }
+    let active = true;
     const unsubscribe = subscribeAuth((nextUser) => {
+      if (!active) return;
       setUser(nextUser);
-      setAuthInitialized(true);
       if (nextUser) {
-        setAuthModalOpen(false);
-        setAuthPromptMessage('');
+        if (!nextUser.isAnonymous) {
+          guestAutoAttemptedRef.current = false;
+          if (!authBusyRef.current) {
+            setAuthModalOpen(false);
+            setAuthPromptMessage('');
+          }
+        }
       } else {
         setSavedOnly(false);
         setPlacingPin(false);
@@ -129,14 +132,23 @@ export default function App() {
         setSubmissionsOpen(false);
         setAdminOpen(false);
         setMythFormState({ open: false, location: null, editingMyth: null });
+        if (!guestAutoAttemptedRef.current && !authBusyRef.current) {
+          guestAutoAttemptedRef.current = true;
+          signInAsGuest().catch((err) => {
+            console.warn('Automatic guest sign-in unavailable:', err?.message || err);
+          });
+        }
       }
     });
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   // 3. Load approved community myths
   const refreshCommunityMyths = useCallback(async () => {
-    if (!isBackendReady) return;
+    if (!firebaseReady) return;
     try {
       const approved = await listApprovedMyths();
       setCommunityMyths(approved);
@@ -263,35 +275,55 @@ export default function App() {
     setAuthModalOpen(true);
   }, []);
 
+  const handleCloseAuthModal = useCallback(() => {
+    setAuthModalOpen(false);
+    setAuthPromptMessage('');
+    if (firebaseReady && !user && !authBusyRef.current) {
+      signInAsGuest().catch(() => {});
+    }
+  }, [user]);
+
   const handleSignIn = async (payload) => {
+    authBusyRef.current = true;
     setAuthBusy(true);
     try {
       const profile = await signInWithEmail(payload);
+      guestAutoAttemptedRef.current = false;
       setUser(profile);
       setAuthModalOpen(false);
       setAuthPromptMessage('');
       showToast(`Welcome, ${profile.name}. Your journey starts here.`);
       refreshCommunityMyths();
     } finally {
+      authBusyRef.current = false;
       setAuthBusy(false);
     }
   };
 
   const handleRegister = async (payload) => {
+    authBusyRef.current = true;
     setAuthBusy(true);
     try {
       const profile = await registerExplorer(payload);
+      guestAutoAttemptedRef.current = false;
       setUser(profile);
       setAuthModalOpen(false);
       setAuthPromptMessage('');
       showToast(`Welcome, ${profile.name}. Your Explorer account is ready.`);
       refreshCommunityMyths();
     } finally {
+      authBusyRef.current = false;
       setAuthBusy(false);
     }
   };
 
   const handleGuest = async () => {
+    if (user?.isAnonymous) {
+      setAuthModalOpen(false);
+      setAuthPromptMessage('');
+      return;
+    }
+    authBusyRef.current = true;
     setAuthBusy(true);
     try {
       const guest = await signInAsGuest();
@@ -301,66 +333,39 @@ export default function App() {
       showToast('Welcome, guest. Explore stories and join creature discussions.');
       refreshCommunityMyths();
     } finally {
+      authBusyRef.current = false;
       setAuthBusy(false);
     }
-  };
-
-  const handleQuickDemoRole = async (role) => {
-    if (!isLocalDemoMode) return;
-    setAuthBusy(true);
-    try {
-      setEncounterStory(null);
-      setPlacingPin(false);
-      setStatusOverride('');
-      setSubmissionsOpen(false);
-      setAdminOpen(false);
-      setMythFormState({ open: false, location: null, editingMyth: null });
-      const profile = await quickSignInDemoRole(role);
-      setUser(profile);
-      setAuthModalOpen(false);
-      setAuthPromptMessage('');
-      await refreshCommunityMyths();
-      const label =
-        profile.role === 'admin'
-          ? 'Administrator'
-          : profile.role === 'user'
-          ? 'Explorer'
-          : 'Guest';
-      showToast(`Switched to ${label} demo account (${profile.name}).`);
-    } finally {
-      setAuthBusy(false);
-    }
-  };
-
-  const handleResetDemo = async () => {
-    if (!isLocalDemoMode) return;
-    if (!window.confirm('Reset local demo submissions, comments, reviews, and bookmarks?')) return;
-    resetLocalDemoData();
-    setSelectedId(null);
-    await refreshCommunityMyths();
-    showToast('Local demo data restored to initial seeded state.');
   };
 
   const handleSignOut = async () => {
+    authBusyRef.current = true;
     setAuthBusy(true);
     try {
       setEncounterStory(null);
+      guestAutoAttemptedRef.current = true;
       await signOutUser();
-      setUser(null);
       setSelectedId(null);
       setAuthPromptMessage('');
-      setAuthModalOpen(true);
-      showToast('Signed out. Sign in again or continue as a guest.');
+      setAuthModalOpen(false);
+      try {
+        const guest = await signInAsGuest();
+        setUser(guest);
+      } catch {
+        setUser(null);
+      }
+      showToast('Signed out. You are now browsing as a guest.');
     } catch (err) {
       showToast(err?.message || 'Could not sign out.');
     } finally {
+      authBusyRef.current = false;
       setAuthBusy(false);
     }
   };
 
   const handleToggleSave = async (story) => {
     if (!canWrite) {
-      handleRequireAuth('Sign in as an Explorer or Administrator to save stories.');
+      handleRequireAuth('Sign in or create an Explorer account to save stories.');
       return;
     }
     setSaveBusy(true);
@@ -377,8 +382,22 @@ export default function App() {
     }
   };
 
+  const handleSavedOnlyChange = useCallback(
+    (checked) => {
+      if (!canWrite) {
+        handleRequireAuth('Sign in or create an Explorer account to save and filter your favorite stories.');
+        return;
+      }
+      setSavedOnly(checked);
+    },
+    [canWrite, handleRequireAuth]
+  );
+
   const handleToggleSharePin = () => {
-    if (!canWrite) return;
+    if (!canWrite) {
+      handleRequireAuth('Sign in or create an Explorer account to share a myth on the map.');
+      return;
+    }
     if (placingPin) {
       setPlacingPin(false);
       setStatusOverride('');
@@ -461,11 +480,8 @@ export default function App() {
       <AppHeader
         user={user}
         busy={authBusy}
-        isDemoMode={isLocalDemoMode}
         onSignOut={handleSignOut}
         onOpenAuth={() => handleRequireAuth('')}
-        onQuickDemoRole={handleQuickDemoRole}
-        onResetDemo={handleResetDemo}
       />
 
       <main>
@@ -482,39 +498,37 @@ export default function App() {
           dataError={dataError}
           onSearchChange={setSearchQuery}
           onTypeFilterChange={setTypeFilter}
-          onSavedOnlyChange={setSavedOnly}
+          onSavedOnlyChange={handleSavedOnlyChange}
           onSelectStory={handleSelectStory}
           onToggleMobile={() => setMobileSidebarOpen((open) => !open)}
           onRetryData={refreshCommunityMyths}
           onOpenHelp={() => setHelpOpen(true)}
         />
 
-        {canWrite && (
-          <div id="top-right-controls" className="map-actions">
-            {user?.role === 'user' && (
-              <button
-                id="submissions-btn"
-                type="button"
-                onClick={() => setSubmissionsOpen(true)}
-              >
-                My submissions
-              </button>
-            )}
-            {user?.role === 'admin' && (
-              <button id="admin-btn" type="button" onClick={() => setAdminOpen(true)}>
-                Dashboard
-              </button>
-            )}
+        <div id="top-right-controls" className="map-actions">
+          {canWrite && user?.role === 'user' && (
             <button
-              id="action-btn"
+              id="submissions-btn"
               type="button"
-              className={`accent-button${placingPin ? ' active' : ''}`}
-              onClick={handleToggleSharePin}
+              onClick={() => setSubmissionsOpen(true)}
             >
-              {placingPin ? 'Cancel pin' : '＋ Share a myth'}
+              My submissions
             </button>
-          </div>
-        )}
+          )}
+          {canWrite && user?.role === 'admin' && (
+            <button id="admin-btn" type="button" onClick={() => setAdminOpen(true)}>
+              Dashboard
+            </button>
+          )}
+          <button
+            id="action-btn"
+            type="button"
+            className={`accent-button${placingPin ? ' active' : ''}`}
+            onClick={handleToggleSharePin}
+          >
+            {placingPin ? 'Cancel pin' : '＋ Share a myth'}
+          </button>
+        </div>
 
         <StoryReader
           story={selectedStory}
@@ -534,16 +548,15 @@ export default function App() {
       </main>
 
       <AuthModal
-        isOpen={authInitialized && authModalOpen}
+        isOpen={authModalOpen}
         initialMessage={authPromptMessage}
-        canDismiss={Boolean(user)}
+        canDismiss={true}
+        isGuest={Boolean(user?.isAnonymous)}
         busy={authBusy}
-        isDemoMode={isLocalDemoMode}
         onSignIn={handleSignIn}
         onRegister={handleRegister}
         onGuest={handleGuest}
-        onQuickDemoRole={handleQuickDemoRole}
-        onClose={() => setAuthModalOpen(false)}
+        onClose={handleCloseAuthModal}
       />
 
       <MythFormModal

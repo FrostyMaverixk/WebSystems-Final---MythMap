@@ -40,6 +40,4 @@ if (isFirebaseConfigured) {
 }
 
 export const firebaseReady = Boolean(app && auth && db && !firebaseError);
-export const isLocalDemoMode = !firebaseReady;
-export const isBackendReady = firebaseReady || isLocalDemoMode;
 export { app, auth, db, firebaseError };

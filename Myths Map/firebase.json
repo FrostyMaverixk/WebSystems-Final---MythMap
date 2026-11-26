@@ -67,7 +67,7 @@
     ],
     "rewrites": [
       {
-        "regex": "^(?!/assets/).*",
+        "source": "**",
         "destination": "/index.html"
       }
     ]

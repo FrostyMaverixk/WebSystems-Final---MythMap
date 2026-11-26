@@ -416,14 +416,11 @@ export function StoryReader({
               id="detail-save"
               type="button"
               disabled={saveBusy}
-              aria-pressed={String(isSaved)}
+              aria-pressed={String(Boolean(canWrite && isSaved))}
+              title={!canWrite ? 'Sign in as an Explorer to save stories' : undefined}
               onClick={() => onToggleSave?.(story)}
             >
-              {canWrite
-                ? isSaved
-                  ? '★ Saved to collection'
-                  : '☆ Save story'
-                : 'Sign in to save'}
+              {canWrite && isSaved ? '★ Saved to collection' : '☆ Save story'}
             </button>
           </div>
         </div>

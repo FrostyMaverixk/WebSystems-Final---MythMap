@@ -6,7 +6,7 @@ import {
   togglePinComment,
   updateComment,
 } from '../services/api.js';
-import { isBackendReady } from '../services/firebase.js';
+import { firebaseReady } from '../services/firebase.js';
 import { dateTimeLabel, roleLabel } from '../utils/format.js';
 
 const COOLDOWN_SECONDS = 10;
@@ -64,7 +64,7 @@ export function DiscussionTab({
   }, [cooldown]);
 
   const loadInitial = useCallback(async () => {
-    if (!storyId || !isBackendReady) {
+    if (!storyId || !firebaseReady) {
       setComments([]);
       setRepliesByParent({});
       setHasMore(false);
@@ -282,7 +282,7 @@ export function DiscussionTab({
     }
   };
 
-  if (!isBackendReady) {
+  if (!firebaseReady) {
     return (
       <div className="reader-tab-section">
         <p className="empty-state">

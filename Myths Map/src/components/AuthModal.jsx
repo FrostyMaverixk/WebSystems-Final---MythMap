@@ -6,12 +6,11 @@ export function AuthModal({
   isOpen,
   initialMessage,
   canDismiss,
+  isGuest = false,
   busy,
-  isDemoMode,
   onSignIn,
   onRegister,
   onGuest,
-  onQuickDemoRole,
   onClose,
 }) {
   const [mode, setMode] = useState('signin'); // 'signin' | 'register'
@@ -24,7 +23,7 @@ export function AuthModal({
 
   useEffect(() => {
     if (isOpen) {
-      setError(initialMessage || '');
+      setError('');
       setPassword('');
     }
   }, [isOpen, initialMessage]);
@@ -48,6 +47,10 @@ export function AuthModal({
   };
 
   const handleGuestClick = async () => {
+    if (isGuest) {
+      onClose?.();
+      return;
+    }
     setError('');
     try {
       await onGuest();
@@ -111,42 +114,18 @@ export function AuthModal({
             {mode === 'register' ? 'Join the archipelago.' : 'Enter the archipelago.'}
           </h2>
           <p className="login-description">
-            {mode === 'register'
+            {initialMessage
+              ? initialMessage
+              : mode === 'register'
               ? 'Create an Explorer account to save favorites, rate legends, and submit local myths.'
               : 'Sign in to save your favorite tales, write reviews, and share a story of your own.'}
           </p>
 
-          {isDemoMode && (
-            <div className="demo-backdoor-box">
-              <div className="demo-backdoor-header">
-                <span>LOCAL DEMO BACKDOOR</span>
-                <small>No Firebase setup required — saved locally in browser</small>
-              </div>
-              <div className="demo-role-grid">
-                <button
-                  type="button"
-                  className="accent-button"
-                  disabled={busy}
-                  onClick={() => onQuickDemoRole?.('admin')}
-                >
-                  Enter as Admin
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onQuickDemoRole?.('user')}
-                >
-                  Enter as Explorer
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onQuickDemoRole?.('guest')}
-                >
-                  Enter as Guest
-                </button>
-              </div>
-            </div>
+          {!firebaseReady && (
+            <p className="form-error" role="status">
+              Firebase is not configured yet. Add your <code>VITE_FIREBASE_*</code> keys to{' '}
+              <code>.env</code> to enable sign-in and guest access.
+            </p>
           )}
 
           <div className="auth-mode-switch" role="group" aria-label="Authentication mode">
@@ -204,19 +183,13 @@ export function AuthModal({
               </>
             )}
 
-            <label htmlFor="login-email">
-              {mode === 'signin' && isDemoMode ? 'Email or demo username' : 'Email address'}
-            </label>
+            <label htmlFor="login-email">Email address</label>
             <input
               id="login-email"
               name="email"
-              type={mode === 'signin' && isDemoMode ? 'text' : 'email'}
+              type="email"
               autoComplete="email"
-              placeholder={
-                mode === 'signin' && isDemoMode
-                  ? 'admin or explorer@demo.local'
-                  : 'explorer@example.com'
-              }
+              placeholder="explorer@example.com"
               required
               maxLength={254}
               value={email}
@@ -258,7 +231,7 @@ export function AuthModal({
               id="login-submit"
               type="submit"
               className="accent-button full-button"
-              disabled={busy || (!firebaseReady && !isDemoMode)}
+              disabled={busy || !firebaseReady}
             >
               {busy
                 ? 'Please wait…'
@@ -277,7 +250,7 @@ export function AuthModal({
             id="login-guest"
             type="button"
             className="full-button guest-button"
-            disabled={busy}
+            disabled={busy || (!isGuest && !firebaseReady)}
             onClick={handleGuestClick}
           >
             Continue as guest <span aria-hidden="true">→</span>
@@ -286,14 +259,6 @@ export function AuthModal({
           <p className="guest-note">
             No account needed. Browse every published story and join creature discussion threads.
           </p>
-
-          {isDemoMode && (
-            <p className="demo-note">
-              <span>LOCAL DEMO</span> Both roles: <strong>admin</strong> / <strong>admin</strong>
-              <br />
-              <small>Or use the 1-click role buttons above (and in the top bar) anytime.</small>
-            </p>
-          )}
         </div>
       </section>
     </div>

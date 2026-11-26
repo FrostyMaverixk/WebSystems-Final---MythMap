@@ -20,28 +20,18 @@ const {
   setAtmosphereTint,
   updateEncounterAtmosphere,
 } = await import('../src/engine/encounter-scene.js');
-import { validateMythImage } from '../src/services/imageUpload.js';
+import { isImageUploadEnabled, validateMythImage } from '../src/services/imageUpload.js';
 import {
-  isLocalDemoMode,
-  quickSignInDemoRole,
+  firebaseReady,
+  signInAsGuest,
+  signInWithEmail,
   registerExplorer,
-  resetLocalDemoData,
   listApprovedMyths,
-  listMySubmissions,
   submitMyth,
-  resubmitMyth,
-  listAllMythsForAdmin,
-  reviewMyth,
-  listAccountsForAdmin,
-  deleteAccountProfile,
   listStoryComments,
   createComment,
-  togglePinComment,
-  deleteComment,
   listStoryReviews,
   saveReview,
-  toggleHighlightReview,
-  toggleBookmark,
   formatFirebaseError,
   summarizeReviews,
 } from '../src/services/api.js';
@@ -325,7 +315,7 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
     assert.match(lore.url, /wikipedia\.org\/wiki\/Manananggal$/);
 
     const bakunawaLore = await fetchWikipediaLore({
-      id: 'demo-myth-bakunawa',
+      id: 'community-myth-bakunawa',
       title: 'Bakunawa of the Visayan Sea',
       region: 'Cebu, Central Visayas',
       community: true,
@@ -333,7 +323,7 @@ test('externalApis gracefully caches Open-Meteo weather and Wikipedia lore with 
     assert.equal(bakunawaLore.title, 'Bakunawa');
 
     const kapreLore = await fetchWikipediaLore({
-      id: 'demo-myth-kapre',
+      id: 'community-myth-kapre',
       title: 'Kapre of the Old Balete',
       region: 'Lipa, Batangas',
       community: true,
@@ -371,146 +361,68 @@ test('distance field and Firebase config files are valid', async () => {
   assert.deepEqual(fbJson.hosting.predeploy, ['npm run build']);
 });
 
-test('localDemoStore runs full Guest, Explorer, and Admin workflows without Firebase config', async () => {
-  assert.equal(isLocalDemoMode, true);
-  resetLocalDemoData();
+test('unconfigured Firebase rejects writes and has no demo backdoor fallback', async () => {
+  assert.equal(firebaseReady, false);
+  assert.equal(isImageUploadEnabled(), false);
 
-  // 1. Seeded data has 1 approved, 1 pending, 1 needs_revision
-  const initialApproved = await listApprovedMyths();
-  assert.equal(initialApproved.length, 1);
-  assert.equal(initialApproved[0].title, 'Bakunawa of the Visayan Sea');
+  assert.deepEqual(await listApprovedMyths(), []);
+  assert.deepEqual(await listStoryComments('manananggal'), {
+    comments: [],
+    repliesByParent: {},
+    nextCursor: null,
+    hasMore: false,
+  });
+  assert.deepEqual(await listStoryReviews('manananggal'), {
+    reviews: [],
+    average: 0,
+    count: 0,
+  });
 
-  // 2. Guest role can comment & reply, but cannot submit myths or reviews
-  const guest = await quickSignInDemoRole('guest');
-  assert.equal(guest.role, 'guest');
+  await assert.rejects(() => signInAsGuest(), /Firebase is not configured yet/i);
+  await assert.rejects(
+    () => signInWithEmail({ email: 'admin@example.com', password: 'password123' }),
+    /Firebase is not configured yet/i
+  );
+  await assert.rejects(
+    () => registerExplorer({ name: 'Lakan Test', email: 'lakan@example.com', password: 'password123' }),
+    /Firebase is not configured yet/i
+  );
+  await assert.rejects(
+    () =>
+      submitMyth(
+        { uid: 'u1', role: 'user', isAnonymous: false },
+        {
+          title: 'Sarangay of Ilocos',
+          author: 'Lakan Test',
+          story: 'A horned guardian creature said to protect hidden treasures deep in the northern hills.',
+          lat: 17.57,
+          lng: 120.38,
+          type: 'land',
+        }
+      ),
+    /Firebase is not configured yet/i
+  );
+  await assert.rejects(
+    () =>
+      createComment({
+        storyId: 'manananggal',
+        user: { uid: 'u1', role: 'guest' },
+        authorName: 'Night Traveler',
+        body: 'Heard this story in Antique!',
+      }),
+    /Firebase is not configured yet/i
+  );
   await assert.rejects(
     () =>
       saveReview({
-        storyId: 'manananggal',
-        user: guest,
+        storyId: 'tikbalang',
+        user: { uid: 'u1', role: 'user', isAnonymous: false },
         rating: 5,
         category: 'appreciation',
-        feedback: 'Should be blocked for guests.',
+        feedback: 'Known across Southern Tagalog forested trails.',
       }),
-    /Sign in as an Explorer/i
+    /Firebase is not configured yet/i
   );
-
-  const guestComment = await createComment({
-    storyId: 'manananggal',
-    parentId: null,
-    user: guest,
-    authorName: 'Night Traveler',
-    body: 'Heard this story in Antique!',
-  });
-  const guestReply = await createComment({
-    storyId: 'manananggal',
-    parentId: guestComment.id,
-    user: guest,
-    authorName: 'Night Traveler',
-    body: 'Specifically near the coastal towns.',
-  });
-  assert.equal(guestReply.parentId, guestComment.id);
-
-  // 3. Register new Explorer (always role: 'user'), bookmark, submit myth, and review
-  const explorer = await registerExplorer({
-    name: 'Lakan Test',
-    email: 'lakan@example.com',
-    password: 'password123',
-  });
-  assert.equal(explorer.role, 'user');
-
-  const bm = await toggleBookmark(explorer.uid, 'manananggal', explorer.bookmarks);
-  assert.deepEqual(bm.bookmarks, ['manananggal']);
-
-  const submitted = await submitMyth(explorer, {
-    title: 'Sarangay of Ilocos',
-    author: explorer.name,
-    story: 'A horned guardian creature said to protect hidden treasures deep in the northern hills.',
-    lat: 17.57,
-    lng: 120.38,
-    type: 'land',
-    region: 'Ilocos Sur',
-    source: 'Northern Luzon folklore',
-    imageUrl: '',
-  });
-  assert.equal(submitted.status, 'pending');
-
-  const ownReview = await saveReview({
-    storyId: 'tikbalang',
-    user: explorer,
-    rating: 4,
-    category: 'regional_variant',
-    feedback: 'Known across Southern Tagalog and Batangas forested trails.',
-  });
-  assert.equal(ownReview.rating, 4);
-
-  // 4. Admin moderates: requests revision -> Explorer resubmits -> Admin approves -> appears on map
-  const admin = await quickSignInDemoRole('admin');
-  assert.equal(admin.role, 'admin');
-
-  await reviewMyth({
-    mythId: submitted.id,
-    status: 'needs_revision',
-    reviewNote: 'Add municipality detail.',
-    adminUser: admin,
-  });
-
-  await quickSignInDemoRole('user');
-  // Switch back to registered explorer via email login is not even needed; check listMySubmissions for lakan
-  const lakanSubs = await listMySubmissions(explorer.uid);
-  assert.equal(lakanSubs[0].status, 'needs_revision');
-  assert.equal(lakanSubs[0].feedbackHistory.length, 1);
-
-  const resubmitted = await resubmitMyth(submitted.id, explorer, {
-    title: 'Sarangay of Vigan Hills',
-    author: explorer.name,
-    story: 'A horned guardian creature said to protect hidden treasures deep in the hills near Vigan.',
-    lat: 17.57,
-    lng: 120.38,
-    type: 'land',
-    region: 'Vigan, Ilocos Sur',
-    source: 'Northern Luzon oral folklore',
-    imageUrl: '',
-  });
-  assert.equal(resubmitted.status, 'pending');
-
-  await quickSignInDemoRole('admin');
-  await reviewMyth({
-    mythId: submitted.id,
-    status: 'approved',
-    reviewNote: 'Approved after revision.',
-    adminUser: admin,
-  });
-
-  const approvedAfter = await listApprovedMyths();
-  assert.equal(approvedAfter.some((m) => m.id === submitted.id), true);
-
-  // 5. Admin pins & deletes comment + child reply, highlights review, and deletes non-self account
-  await togglePinComment({ storyId: 'manananggal', commentId: guestComment.id, pinned: true });
-  let thread = await listStoryComments('manananggal');
-  assert.equal(thread.comments.some((c) => c.id === guestComment.id && c.pinned), true);
-  await deleteComment({
-    storyId: 'manananggal',
-    commentId: guestComment.id,
-    isTopLevel: true,
-    isAdmin: true,
-    currentUid: admin.uid,
-  });
-  thread = await listStoryComments('manananggal');
-  assert.equal(thread.comments.some((c) => c.id === guestComment.id), false);
-
-  await toggleHighlightReview({ storyId: 'tikbalang', reviewUid: explorer.uid, highlighted: true });
-  const tikReviews = await listStoryReviews('tikbalang');
-  assert.equal(tikReviews.reviews.find((r) => r.authorUid === explorer.uid)?.highlighted, true);
-
-  await assert.rejects(() => deleteAccountProfile(admin.uid, admin.uid), /cannot be removed/i);
-  await deleteAccountProfile(explorer.uid, admin.uid);
-  const allMyths = await listAllMythsForAdmin();
-  assert.equal(allMyths.some((m) => m.id === submitted.id), true); // myth preserved
-  const remainingAccounts = await listAccountsForAdmin(allMyths);
-  assert.equal(remainingAccounts.some((a) => a.uid === explorer.uid), false);
-
-  resetLocalDemoData();
 });
 
 test('formatAtmosphereSummary produces one combined message without clock times', () => {

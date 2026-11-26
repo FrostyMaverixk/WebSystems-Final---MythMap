@@ -25,12 +25,9 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { auth, db, firebaseReady, isBackendReady, isLocalDemoMode } from './firebase.js';
-import * as localDemo from './localDemoStore.js';
+import { auth, db, firebaseReady } from './firebase.js';
 
-export { isLocalDemoMode, isBackendReady };
-export const quickSignInDemoRole = (role) => localDemo.quickSignInRole(role);
-export const resetLocalDemoData = () => localDemo.resetDemoData();
+export { firebaseReady };
 
 export const REVIEW_CATEGORIES = Object.freeze([
   { value: 'appreciation', label: 'Appreciation' },
@@ -241,7 +238,6 @@ async function loadOrInitUserProfile(firebaseUser) {
 }
 
 export function subscribeAuth(callback) {
-  if (isLocalDemoMode) return localDemo.subscribeAuth(callback);
   if (!firebaseReady || !auth) {
     callback(null);
     return () => {};
@@ -279,26 +275,41 @@ export function subscribeAuth(callback) {
   });
 }
 
+let pendingGuestSignIn = null;
+
 export async function signInAsGuest() {
-  if (isLocalDemoMode) return localDemo.signInAsGuest();
   ensureFirebase();
-  try {
-    const credential = await signInAnonymously(auth);
+  if (auth.currentUser?.isAnonymous) {
     return {
-      uid: credential.user.uid,
+      uid: auth.currentUser.uid,
       role: 'guest',
       name: 'Guest',
       email: '',
       isAnonymous: true,
       bookmarks: [],
     };
-  } catch (error) {
-    throw new Error(formatFirebaseError(error, 'Could not start guest session.'));
   }
+  if (!pendingGuestSignIn) {
+    pendingGuestSignIn = signInAnonymously(auth)
+      .then((credential) => ({
+        uid: credential.user.uid,
+        role: 'guest',
+        name: 'Guest',
+        email: '',
+        isAnonymous: true,
+        bookmarks: [],
+      }))
+      .catch((error) => {
+        throw new Error(formatFirebaseError(error, 'Could not start guest session.'));
+      })
+      .finally(() => {
+        pendingGuestSignIn = null;
+      });
+  }
+  return pendingGuestSignIn;
 }
 
 export async function signInWithEmail({ email, password, expectedRole }) {
-  if (isLocalDemoMode) return localDemo.signInWithEmail({ email, password, expectedRole });
   ensureFirebase();
   const cleanEmail = String(email || '').trim();
   if (!cleanEmail || !password) {
@@ -319,7 +330,6 @@ export async function signInWithEmail({ email, password, expectedRole }) {
 }
 
 export async function registerExplorer({ name, email, password }) {
-  if (isLocalDemoMode) return localDemo.registerExplorer({ name, email, password });
   ensureFirebase();
   const cleanName = String(name || '').trim();
   const cleanEmail = String(email || '').trim().toLowerCase();
@@ -357,7 +367,6 @@ export async function registerExplorer({ name, email, password }) {
 }
 
 export async function signOutUser() {
-  if (isLocalDemoMode) return localDemo.signOutUser();
   if (!firebaseReady || !auth) return;
   await signOut(auth);
 }
@@ -366,7 +375,6 @@ export async function signOutUser() {
 // Bookmarks (users/{uid}.bookmarks)
 // ===========================================================================
 export async function toggleBookmark(uid, storyId, currentBookmarks = []) {
-  if (isLocalDemoMode) return localDemo.toggleBookmark(uid, storyId, currentBookmarks);
   ensureFirebase();
   if (!uid || !storyId || !/^[a-zA-Z0-9_-]{1,100}$/.test(storyId)) {
     throw new Error('Invalid story ID.');
@@ -397,7 +405,6 @@ export async function toggleBookmark(uid, storyId, currentBookmarks = []) {
 // Community Myths (myths/{mythId})
 // ===========================================================================
 export async function listApprovedMyths() {
-  if (isLocalDemoMode) return localDemo.listApprovedMyths();
   if (!firebaseReady || !db) return [];
   const col = collection(db, 'myths');
   try {
@@ -415,7 +422,6 @@ export async function listApprovedMyths() {
 }
 
 export async function listMySubmissions(uid) {
-  if (isLocalDemoMode) return localDemo.listMySubmissions(uid);
   ensureFirebase();
   const col = collection(db, 'myths');
   try {
@@ -433,7 +439,6 @@ export async function listMySubmissions(uid) {
 }
 
 export async function submitMyth(user, data) {
-  if (isLocalDemoMode) return localDemo.submitMyth(user, data);
   ensureFirebase();
   if (!user || user.isAnonymous || !['user', 'admin'].includes(user.role)) {
     throw new Error('Sign in as an Explorer or Administrator to share a myth.');
@@ -456,7 +461,6 @@ export async function submitMyth(user, data) {
 }
 
 export async function resubmitMyth(mythId, user, data) {
-  if (isLocalDemoMode) return localDemo.resubmitMyth(mythId, user, data);
   ensureFirebase();
   if (!user || user.isAnonymous || !['user', 'admin'].includes(user.role)) {
     throw new Error('Sign in to edit and resubmit your story.');
@@ -478,7 +482,6 @@ export async function resubmitMyth(mythId, user, data) {
 // Admin Moderation & Account Directory
 // ===========================================================================
 export async function listAllMythsForAdmin() {
-  if (isLocalDemoMode) return localDemo.listAllMythsForAdmin();
   ensureFirebase();
   try {
     const snap = await getDocs(query(collection(db, 'myths'), orderBy('createdAt', 'desc')));
@@ -493,7 +496,6 @@ export async function listAllMythsForAdmin() {
 }
 
 export async function reviewMyth({ mythId, status, reviewNote = '', adminUser }) {
-  if (isLocalDemoMode) return localDemo.reviewMyth({ mythId, status, reviewNote, adminUser });
   ensureFirebase();
   if (!VALID_MYTH_STATUSES.has(status)) {
     throw new Error('Invalid moderation status.');
@@ -525,7 +527,6 @@ export async function reviewMyth({ mythId, status, reviewNote = '', adminUser })
 }
 
 export async function deleteMyth(mythId) {
-  if (isLocalDemoMode) return localDemo.deleteMyth(mythId);
   ensureFirebase();
   try {
     await deleteDoc(doc(db, 'myths', mythId));
@@ -535,7 +536,6 @@ export async function deleteMyth(mythId) {
 }
 
 export async function listAccountsForAdmin(myths = []) {
-  if (isLocalDemoMode) return localDemo.listAccountsForAdmin(myths);
   ensureFirebase();
   try {
     const snap = await getDocs(collection(db, 'users'));
@@ -563,7 +563,6 @@ export async function listAccountsForAdmin(myths = []) {
 }
 
 export async function deleteAccountProfile(uid, currentAdminUid) {
-  if (isLocalDemoMode) return localDemo.deleteAccountProfile(uid, currentAdminUid);
   ensureFirebase();
   if (uid === currentAdminUid) {
     throw new Error('Your signed-in administrator account cannot be removed.');
@@ -579,7 +578,6 @@ export async function deleteAccountProfile(uid, currentAdminUid) {
 // Per-Creature Community Discussion Threads (stories/{storyId}/comments)
 // ===========================================================================
 export async function getStoryCommentCount(storyId) {
-  if (isLocalDemoMode) return localDemo.getStoryCommentCount(storyId);
   if (!firebaseReady || !db || !storyId) return 0;
   try {
     const agg = await getCountFromServer(collection(db, 'stories', storyId, 'comments'));
@@ -590,7 +588,6 @@ export async function getStoryCommentCount(storyId) {
 }
 
 export async function listStoryComments(storyId, { pageSize = 20, cursor = null } = {}) {
-  if (isLocalDemoMode) return localDemo.listStoryComments(storyId, { pageSize, cursor });
   if (!firebaseReady || !db || !storyId) {
     return { comments: [], repliesByParent: {}, nextCursor: null, hasMore: false };
   }
@@ -672,7 +669,6 @@ export async function listStoryComments(storyId, { pageSize = 20, cursor = null 
 }
 
 export async function createComment({ storyId, parentId = null, user, authorName, body }) {
-  if (isLocalDemoMode) return localDemo.createComment({ storyId, parentId, user, authorName, body });
   ensureFirebase();
   if (!user?.uid) {
     throw new Error('Sign in or continue as a Guest to join the discussion.');
@@ -719,7 +715,6 @@ export async function createComment({ storyId, parentId = null, user, authorName
 }
 
 export async function updateComment({ storyId, commentId, body }) {
-  if (isLocalDemoMode) return localDemo.updateComment({ storyId, commentId, body });
   ensureFirebase();
   const cleanBody = String(body || '').trim();
   if (cleanBody.length < 1 || cleanBody.length > 1000) {
@@ -736,7 +731,6 @@ export async function updateComment({ storyId, commentId, body }) {
 }
 
 export async function togglePinComment({ storyId, commentId, pinned }) {
-  if (isLocalDemoMode) return localDemo.togglePinComment({ storyId, commentId, pinned });
   ensureFirebase();
   try {
     await updateDoc(doc(db, 'stories', storyId, 'comments', commentId), {
@@ -749,7 +743,6 @@ export async function togglePinComment({ storyId, commentId, pinned }) {
 }
 
 export async function deleteComment({ storyId, commentId, isTopLevel = false, isAdmin = false, currentUid = '' }) {
-  if (isLocalDemoMode) return localDemo.deleteComment({ storyId, commentId, isTopLevel, isAdmin, currentUid });
   ensureFirebase();
   const commentsCol = collection(db, 'stories', storyId, 'comments');
   try {
@@ -775,7 +768,6 @@ export async function deleteComment({ storyId, commentId, isTopLevel = false, is
 // Published Myth Reviews & Feedback (stories/{storyId}/reviews/{authorUid})
 // ===========================================================================
 export async function listStoryReviews(storyId) {
-  if (isLocalDemoMode) return localDemo.listStoryReviews(storyId);
   if (!firebaseReady || !db || !storyId) {
     return { reviews: [], average: 0, count: 0 };
   }
@@ -802,7 +794,6 @@ export function summarizeReviews(reviews) {
 }
 
 export async function saveReview({ storyId, user, rating, category, feedback, existingReview }) {
-  if (isLocalDemoMode) return localDemo.saveReview({ storyId, user, rating, category, feedback, existingReview });
   ensureFirebase();
   if (!user || user.isAnonymous || !['user', 'admin'].includes(user.role)) {
     throw new Error('Sign in as an Explorer or Administrator to submit a review.');
@@ -874,7 +865,6 @@ export async function saveReview({ storyId, user, rating, category, feedback, ex
 }
 
 export async function deleteReview({ storyId, reviewUid }) {
-  if (isLocalDemoMode) return localDemo.deleteReview({ storyId, reviewUid });
   ensureFirebase();
   try {
     await deleteDoc(doc(db, 'stories', storyId, 'reviews', reviewUid));
@@ -884,7 +874,6 @@ export async function deleteReview({ storyId, reviewUid }) {
 }
 
 export async function toggleHighlightReview({ storyId, reviewUid, highlighted }) {
-  if (isLocalDemoMode) return localDemo.toggleHighlightReview({ storyId, reviewUid, highlighted });
   ensureFirebase();
   try {
     await updateDoc(doc(db, 'stories', storyId, 'reviews', reviewUid), {
